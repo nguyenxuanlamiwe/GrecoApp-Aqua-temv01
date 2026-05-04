@@ -1,0 +1,86 @@
+{
+  "project_info": {
+    "project_number": "325774310920",
+    "project_id": "greco-6708d",
+    "storage_bucket": "greco-6708d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:325774310920:android:6ad7d01a740ca4251adbbd",
+        "android_client_info": {
+          "package_name": "com.zen8apps.greco"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKu-gblaALwOARjYuBHB3qJD4a8GIGm1s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:325774310920:android:6ad7d01a740ca4251adbbd",
+        "android_client_info": {
+          "package_name": "com.zen8apps.greco.dev"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKu-gblaALwOARjYuBHB3qJD4a8GIGm1s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:325774310920:android:6ad7d01a740ca4251adbbd",
+        "android_client_info": {
+          "package_name": "com.zen8apps.greco.stg"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKu-gblaALwOARjYuBHB3qJD4a8GIGm1s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:325774310920:android:73f21a54131145b91adbbd",
+        "android_client_info": {
+          "package_name": "com.zen8labs.greco"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKu-gblaALwOARjYuBHB3qJD4a8GIGm1s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
