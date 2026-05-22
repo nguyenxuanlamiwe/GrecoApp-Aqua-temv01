@@ -38,9 +38,15 @@ enum _ControlSystemTab {
 class _TBControlSystemPageState extends State<TBControlSystemPage> {
   final _vm = TBControlSystemVM();
   final _rxBag = CompositeSubscription();
+  final _localStore = DI.resolve<LocalStore>();
 
   //state variables
   late var _currentSystem = widget.systems.first;
+  var _enabledFeatures = <String>{}; // set of enabled optional feature keys
+
+  // Optional features that can be toggled per-device (forecast, camera)
+  static const _featureForecast = 'forecast';
+  static const _featureCamera = 'camera';
 
   List<_ControlSystemTab> get _displayTabs {
     final isAquaculture = _currentSystem.appType == "aquaculture";
@@ -51,10 +57,15 @@ class _TBControlSystemPageState extends State<TBControlSystemPage> {
         ],
         if (!isAquaculture && _currentSystem.hyrdromets.isNotEmpty)
           _ControlSystemTab.hyrdromets,
-        if (_currentSystem.weatherForcast) _ControlSystemTab.forecast,
-        if (_currentSystem.hasCamera || _currentSystem.camera.isNotEmpty)
+        if (_currentSystem.weatherForcast &&
+            _enabledFeatures.contains(_featureForecast))
+          _ControlSystemTab.forecast,
+        if ((_currentSystem.hasCamera || _currentSystem.camera.isNotEmpty) &&
+            _enabledFeatures.contains(_featureCamera))
           _ControlSystemTab.camera,
-        if (!isAquaculture && _currentSystem.groups.isNotEmpty)
+        if (!isAquaculture &&
+            _currentSystem.groups.isNotEmpty &&
+            _currentSystem.hasSuggestion)
           _ControlSystemTab.suggestion,
       ];
   }
@@ -81,6 +92,7 @@ class _TBControlSystemPageState extends State<TBControlSystemPage> {
       });
     }).addTo(_rxBag);
 
+    await _loadFeatures(_currentSystem.deviceId);
     await _vm.connectToMQTTBroker();
     _vm.input.selectedSystem.add(_currentSystem);
   }
@@ -167,6 +179,125 @@ class _TBControlSystemPageState extends State<TBControlSystemPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _loadFeatures(String deviceId) async {
+    final stored = await _localStore.getValue<List<String>>(
+      LocalStoreKey.systemFeatures(deviceId),
+      defaultValue: null,
+    );
+    
+    // If no stored preferences, auto-enable all available features
+    if (stored == null || stored.isEmpty) {
+      final autoEnabled = <String>{};
+      if (_currentSystem.weatherForcast) {
+        autoEnabled.add(_featureForecast);
+      }
+      if (_currentSystem.hasCamera || _currentSystem.camera.isNotEmpty) {
+        autoEnabled.add(_featureCamera);
+      }
+      setState(() {
+        _enabledFeatures = autoEnabled;
+      });
+      // Save the auto-enabled features
+      if (autoEnabled.isNotEmpty) {
+        await _saveFeatures();
+      }
+    } else {
+      setState(() {
+        _enabledFeatures = stored.toSet();
+      });
+    }
+  }
+
+  Future<void> _saveFeatures() async {
+    await _localStore.setValue(
+      LocalStoreKey.systemFeatures(_currentSystem.deviceId),
+      _enabledFeatures.toList(),
+    );
+  }
+
+  Future<void> _showFeaturesDialog() async {
+    final isAquaculture = _currentSystem.appType == 'aquaculture';
+    // build list of available optional features for this system
+    final available = <(String, String)>[
+      if (_currentSystem.weatherForcast) (_featureForecast, 'Dự báo thời tiết'),
+      if (_currentSystem.hasCamera || _currentSystem.camera.isNotEmpty)
+        (_featureCamera, 'Camera giám sát'),
+    ];
+
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không có tính năng tuỳ chọn')),
+      );
+      return;
+    }
+
+    // working copy
+    final working = {..._enabledFeatures};
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          title: Text(
+            'Tính năng',
+            style: AppTheme.textStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final (key, label) in available)
+                CheckboxListTile(
+                  value: working.contains(key),
+                  activeColor: AppTheme.primaryColor,
+                  title: Text(label, style: AppTheme.textStyle(fontSize: 15)),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (checked) {
+                    setLocal(() {
+                      if (checked == true) {
+                        working.add(key);
+                      } else {
+                        working.remove(key);
+                      }
+                    });
+                  },
+                ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEDF4F0),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+              ),
+              child: Text('Huỷ',
+                  style: AppTheme.textStyle(
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.primaryColor)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+              ),
+              child: Text('Xong',
+                  style: AppTheme.textStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    ).then((confirmed) async {
+      if (confirmed == true) {
+        setState(() => _enabledFeatures = working);
+        await _saveFeatures();
+      }
+    });
   }
 
   Widget? _appBarTitleWidget() {
@@ -340,6 +471,7 @@ class _TBControlSystemPageState extends State<TBControlSystemPage> {
         _currentSystem = selectedSystem;
         _isRestarting = null;
       });
+      await _loadFeatures(selectedSystem.deviceId);
       _vm.input.selectedSystem.add(selectedSystem);
     }
   }

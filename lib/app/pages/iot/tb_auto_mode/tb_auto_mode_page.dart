@@ -99,6 +99,38 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
           false,
   };
 
+  // Irrigation SM mode state
+  late final Map<int, TextEditingController> _smStartControllers = {
+    for (var lot in _lots)
+      lot.id: TextEditingController(
+        text: _editingMode.lotList
+                .where((l) => l.id == lot.id)
+                .firstOrNull
+                ?.smStart
+                ?.toString() ??
+            '',
+      ),
+  };
+  late final Map<int, TextEditingController> _smEndControllers = {
+    for (var lot in _lots)
+      lot.id: TextEditingController(
+        text: _editingMode.lotList
+                .where((l) => l.id == lot.id)
+                .firstOrNull
+                ?.smEnd
+                ?.toString() ??
+            '',
+      ),
+  };
+  late final Map<int, bool> _smEndEnabled = {
+    for (var lot in _lots)
+      lot.id: _editingMode.lotList
+              .where((l) => l.id == lot.id)
+              .firstOrNull
+              ?.smEndEnabled ??
+          false,
+  };
+
   // Station mode controls
   late bool _stationEnabled = _editingMode.stationEnabled;
   late final List<int> _stationRlcIndices = _getStationRlcIndices();
@@ -106,6 +138,10 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     for (var index in _stationRlcIndices)
       index: _editingMode.stationRlc.contains(index),
   };
+
+  // Irrigation timer: run mode
+  late String _irrigationRunMode =
+      _editingMode.runMode ?? TBRunMode.alternating;
 
   /// Find rlc indices (rlc0, rlc1...) from a lot's components
   List<int> _getRlcIndices(TBGroup lot) {
@@ -124,6 +160,19 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
         .where((c) =>
             c.dataType == 'float' &&
             c.variable.toLowerCase().startsWith('do'))
+        .map((c) => int.tryParse(c.variable.substring(2)))
+        .where((i) => i != null)
+        .cast<int>()
+        .toList()
+      ..sort();
+  }
+
+  /// Find SM (soil moisture) indices (sm1, sm2...) from a lot's components
+  List<int> _getSmIndices(TBGroup lot) {
+    return lot.components
+        .where((c) =>
+            c.dataType == 'float' &&
+            c.variable.toLowerCase().startsWith('sm'))
         .map((c) => int.tryParse(c.variable.substring(2)))
         .where((i) => i != null)
         .cast<int>()
@@ -152,6 +201,20 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     return allRlc.toList()..sort();
   }
 
+  /// Find first tIriAuto index (tIriAuto0, tIriAuto1...) from a lot's components
+  int? _getIriAutoIndex(TBGroup lot) {
+    final indices = lot.components
+        .where((c) =>
+            c.dataType == 'float' &&
+            c.variable.toLowerCase().startsWith('tiriauto'))
+        .map((c) => int.tryParse(c.variable.substring(8)))
+        .where((i) => i != null)
+        .cast<int>()
+        .toList()
+      ..sort();
+    return indices.isNotEmpty ? indices.first : null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -173,6 +236,12 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     for (var c in _doEndControllers.values) {
       c.dispose();
     }
+    for (var c in _smStartControllers.values) {
+      c.dispose();
+    }
+    for (var c in _smEndControllers.values) {
+      c.dispose();
+    }
   }
 
   void _bindViewModel() {
@@ -185,8 +254,13 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     }).addTo(_rxBag);
   }
 
+  bool get _isIrrigation => widget.system.appType == 'irrigation';
+
   @override
   Widget build(BuildContext context) {
+    if (_isIrrigation) {
+      return _buildIrrigationLotMode();
+    }
     if (_editingMode.isAquacultureMode) {
       return _buildAquacultureMode();
     }
@@ -578,6 +652,358 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
             const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
     );
+  }
+
+  // ==================== IRRIGATION LOT MODE ====================
+
+  Widget _buildIrrigationLotMode() {
+    final title = switch (_editingMode.modeType) {
+      TBModeType.timer => "Tưới theo thời gian",
+      TBModeType.soilMoisture => "Kiểm soát độ ẩm đất",
+      TBModeType.fertilizer => "Châm phân tự động",
+      _ => "Chế độ tưới",
+    };
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(title),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            ),
+            onPressed: _submitIrrigation,
+            child: Text(
+              'Lưu lại',
+              style: AppTheme.textStyle(
+                color: AppTheme.primaryColor,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: LoadingWidget(
+        error: _vm.errorTracker.asAppError(),
+        isLoading: _vm.activityTracker.isRunningAny(),
+        child: ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          children: [
+            _idWidget(),
+            const SizedBox(height: 16),
+            if (_editingMode.modeType == TBModeType.timer) ...[
+              _irrigationRunModeWidget(),
+              const SizedBox(height: 16),
+            ],
+            if (_station != null) ...[
+              _stationControlWidget(),
+              const SizedBox(height: 16),
+            ],
+            Text(
+              "Danh sách Lô",
+              style: AppTheme.textStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            for (var lot in _lots) ...[
+              if (_editingMode.modeType == TBModeType.timer)
+                _timerLotWidget(lot)
+              else if (_editingMode.modeType == TBModeType.soilMoisture)
+                _smLotWidget(lot)
+              else
+                _timerLotWidget(lot), // fertilizer: dùng timer tạm, chi tiết sau
+              const SizedBox(height: 8),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _irrigationRunModeWidget() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.$E1E1E1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "Cách chạy các lô:",
+            style: AppTheme.textStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(
+                      () => _irrigationRunMode = TBRunMode.alternating),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _irrigationRunMode == TBRunMode.alternating
+                          ? AppTheme.primaryColor.withOpacity(0.12)
+                          : AppTheme.$F3F3F3,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _irrigationRunMode == TBRunMode.alternating
+                            ? AppTheme.primaryColor
+                            : AppTheme.$E1E1E1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.linear_scale,
+                          size: 18,
+                          color: _irrigationRunMode == TBRunMode.alternating
+                              ? AppTheme.primaryColor
+                              : AppTheme.$A3A3A3,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Luân phiên",
+                          style: AppTheme.textStyle(
+                            fontSize: 14,
+                            fontWeight:
+                                _irrigationRunMode == TBRunMode.alternating
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                            color: _irrigationRunMode == TBRunMode.alternating
+                                ? AppTheme.primaryColor
+                                : AppTheme.$A3A3A3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(
+                      () => _irrigationRunMode = TBRunMode.simultaneous),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _irrigationRunMode == TBRunMode.simultaneous
+                          ? AppTheme.primaryColor.withOpacity(0.12)
+                          : AppTheme.$F3F3F3,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _irrigationRunMode == TBRunMode.simultaneous
+                            ? AppTheme.primaryColor
+                            : AppTheme.$E1E1E1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.call_split,
+                          size: 18,
+                          color: _irrigationRunMode == TBRunMode.simultaneous
+                              ? AppTheme.primaryColor
+                              : AppTheme.$A3A3A3,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Đồng thời",
+                          style: AppTheme.textStyle(
+                            fontSize: 14,
+                            fontWeight:
+                                _irrigationRunMode == TBRunMode.simultaneous
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                            color: _irrigationRunMode == TBRunMode.simultaneous
+                                ? AppTheme.primaryColor
+                                : AppTheme.$A3A3A3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _smLotWidget(TBGroup lot) {
+    final smVars = _getSmIndices(lot);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.$E1E1E1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Checkbox(
+                value: _lotSelected[lot.id] ?? false,
+                onChanged: (value) {
+                  setState(() {
+                    _lotSelected[lot.id] = value ?? false;
+                  });
+                },
+              ),
+              Expanded(
+                child: Text(
+                  lot.name,
+                  style: AppTheme.textStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_lotSelected[lot.id] == true) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Text(
+                "Sensor ẩm: ${smVars.map((i) => 'sm$i').join(', ')}",
+                style: AppTheme.textStyle(fontSize: 12, color: AppTheme.$A3A3A3),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Text(
+                "Độ ẩm bắt đầu tưới (%):",
+                style: AppTheme.textStyle(fontSize: 14),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: _inputField(
+                controller: _smStartControllers[lot.id]!,
+                hintText: "Ngưỡng bắt đầu",
+                suffixText: "%",
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Checkbox(
+                  value: _smEndEnabled[lot.id] ?? false,
+                  onChanged: (value) {
+                    setState(() {
+                      _smEndEnabled[lot.id] = value ?? false;
+                    });
+                  },
+                ),
+                Expanded(
+                  child: Text(
+                    "Ngưỡng dừng tưới (%):",
+                    style: AppTheme.textStyle(fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+            if (_smEndEnabled[lot.id] == true)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: _inputField(
+                  controller: _smEndControllers[lot.id]!,
+                  hintText: "Ngưỡng dừng",
+                  suffixText: "%",
+                ),
+              ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const SizedBox(width: 12),
+                Text("Tính toán: ", style: AppTheme.textStyle(fontSize: 14)),
+                const SizedBox(width: 8),
+                _calcMethodChip(lot.id, "min", "Min"),
+                const SizedBox(width: 4),
+                _calcMethodChip(lot.id, "avg", "TB"),
+                const SizedBox(width: 4),
+                _calcMethodChip(lot.id, "max", "Max"),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _submitIrrigation() {
+    _editingMode.lotList.clear();
+    for (var lot in _lots) {
+      if (_lotSelected[lot.id] != true) continue;
+      final rlcIndices = _getRlcIndices(lot);
+      if (_editingMode.modeType == TBModeType.timer) {
+        final mins = double.tryParse(_minsControllers[lot.id]!.text);
+        _editingMode.lotList.add(TBLotConfig(
+          id: lot.id,
+          mins: mins,
+          rlc: rlcIndices,
+          iriAutoIndex: _getIriAutoIndex(lot),
+        ));
+      } else if (_editingMode.modeType == TBModeType.soilMoisture) {
+        final smEndOn = _smEndEnabled[lot.id] ?? false;
+        _editingMode.lotList.add(TBLotConfig(
+          id: lot.id,
+          smStart: double.tryParse(_smStartControllers[lot.id]!.text),
+          smEnd: smEndOn
+              ? double.tryParse(_smEndControllers[lot.id]!.text)
+              : null,
+          smEndEnabled: smEndOn,
+          calcMethod: _calcMethods[lot.id],
+          rlc: rlcIndices,
+          smIndices: _getSmIndices(lot),
+        ));
+      } else {
+        // fertilizer: chi tiết tính sau, tạm lưu timer
+        final mins = double.tryParse(_minsControllers[lot.id]!.text);
+        _editingMode.lotList.add(TBLotConfig(
+          id: lot.id,
+          mins: mins,
+          rlc: rlcIndices,
+        ));
+      }
+    }
+    _editingMode.runMode = (_editingMode.modeType == TBModeType.timer)
+        ? _irrigationRunMode
+        : null;
+    _editingMode.stationEnabled = _stationEnabled;
+    _editingMode.stationRlc.clear();
+    for (var index in _stationRlcIndices) {
+      if (_stationRlcSelected[index] ?? false) {
+        _editingMode.stationRlc.add(index);
+      }
+    }
+
+    if (_editingMode.validate()) {
+      _vm.input.update.add((_editingMode, widget.system.deviceId));
+    } else {
+      _showError("Vui lòng nhập đầy đủ và chính xác thông tin");
+    }
   }
 
   // ==================== STEP MODE (IRRIGATION) ====================

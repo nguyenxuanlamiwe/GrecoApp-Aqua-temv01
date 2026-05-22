@@ -79,6 +79,16 @@ abstract class _$AppRouter extends RootStackRouter {
         ),
       );
     },
+    UIConfigRoute.name: (routeData) {
+      final args = routeData.argsAs<UIConfigRouteArgs>();
+      return AutoRoutePage<dynamic>(
+        routeData: routeData,
+        child: UIConfigPage(
+          key: args.key,
+          farm: args.farm,
+        ),
+      );
+    },
   };
 }
 
@@ -306,5 +316,43 @@ class TBControlSystemRouteArgs {
   @override
   String toString() {
     return 'TBControlSystemRouteArgs{key: $key, systems: $systems}';
+  }
+}
+
+/// generated route for
+/// [UIConfigPage]
+class UIConfigRoute extends PageRouteInfo<UIConfigRouteArgs> {
+  UIConfigRoute({
+    Key? key,
+    required TBFarm farm,
+    List<PageRouteInfo>? children,
+  }) : super(
+          UIConfigRoute.name,
+          args: UIConfigRouteArgs(
+            key: key,
+            farm: farm,
+          ),
+          initialChildren: children,
+        );
+
+  static const String name = 'UIConfigRoute';
+
+  static const PageInfo<UIConfigRouteArgs> page =
+      PageInfo<UIConfigRouteArgs>(name);
+}
+
+class UIConfigRouteArgs {
+  const UIConfigRouteArgs({
+    this.key,
+    required this.farm,
+  });
+
+  final Key? key;
+
+  final TBFarm farm;
+
+  @override
+  String toString() {
+    return 'UIConfigRouteArgs{key: $key, farm: $farm}';
   }
 }

@@ -36,7 +36,9 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
   var _allModes = <TBATMode>[];
 
   bool get _isAquaculture => widget.controlSystem.appType == "aquaculture";
+  bool get _isIrrigation => widget.controlSystem.appType == "irrigation";
   var _startNow = false;
+  String? _scheduleType; // irrigation only
 
   @override
   void initState() {
@@ -59,6 +61,7 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
       _currentATSys = widget.atSystem!.copy();
     }
     _startNow = _currentATSys.startNow;
+    _scheduleType = _currentATSys.scheduleType ?? 'onetime';
     _prMaintainTextController.text =
         (_currentATSys.prMaintainValue ?? 0).toString();
 
@@ -102,7 +105,13 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
           children: [
             if (_isAquaculture)
               _startTimeWidget()
-            else
+            else if (_isIrrigation) ...[
+              _prMaintainWidget(),
+              const SizedBox(height: 8),
+              _startTimeWidget(),
+              const SizedBox(height: 8),
+              _scheduleTypeWidget(),
+            ] else
               _prMaintainWidget(),
             const SizedBox(height: 8),
             _autoModeSelectionWidget(),
@@ -224,6 +233,56 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
                   "Ngay bây giờ",
                   style: AppTheme.textStyle(fontSize: 15),
                 ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _scheduleTypeWidget() {
+    const options = [
+      ('onetime', 'Một lần'),
+      ('daily', 'Hàng ngày'),
+      ('weekly', 'Hàng tuần'),
+      ('monthly', 'Hàng tháng'),
+    ];
+    return Material(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              "Chu kỳ lặp lại:",
+              style: AppTheme.textStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final (value, label) in options)
+                  ChoiceChip(
+                    label: Text(label),
+                    selected: _scheduleType == value,
+                    onSelected: (_) => setState(() => _scheduleType = value),
+                    selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+                    labelStyle: AppTheme.textStyle(
+                      fontSize: 14,
+                      color: _scheduleType == value
+                          ? AppTheme.primaryColor
+                          : AppTheme.$A3A3A3,
+                      fontWeight: _scheduleType == value
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
               ],
             ),
           ],
@@ -488,6 +547,13 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
       if (!_startNow) {
         // startTime already set by _pickStartTime
       }
+    } else if (_isIrrigation) {
+      _currentATSys.prMaintainValue =
+          double.tryParse(_prMaintainTextController.text);
+      _currentATSys.safeAtpress =
+          double.tryParse(_safeAtpressTextController.text);
+      _currentATSys.startNow = _startNow;
+      _currentATSys.scheduleType = _scheduleType;
     } else {
       _currentATSys.prMaintainValue =
           double.tryParse(_prMaintainTextController.text);

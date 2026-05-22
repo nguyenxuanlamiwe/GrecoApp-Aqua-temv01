@@ -59,9 +59,13 @@ class TBAutoControlVM
         .addTo(rxBag);
 
     input.reload
-        .switchMap((_) => tbService
-            .getDeviceAttributes(system.deviceId, null)
-            .trackActivity("reload", activityTracker))
+        .switchMap((_) => Rx.zip2(
+              tbService.getDeviceAttributes(system.deviceId, null),
+              tbService
+                  .getSensorValues(system.deviceId, null)
+                  .onErrorReturn({}),
+              (attrs, telemetry) => {...attrs, ...telemetry},
+            ).trackActivity("reload", activityTracker))
         .handleErrorBy(errorTracker)
         .bindTo(output.reloadedValues)
         .addTo(rxBag);
@@ -76,7 +80,7 @@ class TBAutoControlVM
 
     input.autoEnable
         .switchMap((enable) => tbService
-            .setValueOneWay(system.deviceId, "autoEnable", enable)
+            .setValue(system.deviceId, "autoEnable", enable)
             .trackActivity("auto", activityTracker))
         .handleErrorBy(errorTracker)
         .bindTo(output.updatedValues)
@@ -84,7 +88,7 @@ class TBAutoControlVM
 
     input.autoPauseEnable
         .switchMap((enable) => tbService
-            .setValueOneWay(system.deviceId, "autoPauseEnable", enable)
+            .setValue(system.deviceId, "autoPauseEnable", enable)
             .trackActivity("pause", activityTracker))
         .handleErrorBy(errorTracker)
         .bindTo(output.updatedValues)

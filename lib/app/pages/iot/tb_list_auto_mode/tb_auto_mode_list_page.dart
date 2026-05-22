@@ -27,6 +27,7 @@ class _TBAutoModeListPageState extends State<TBAutoModeListPage> {
   var _modes = <TBATMode>[];
 
   bool get _isAquaculture => widget.system.appType == "aquaculture";
+  bool get _isIrrigation => widget.system.appType == "irrigation";
 
   @override
   void initState() {
@@ -64,7 +65,11 @@ class _TBAutoModeListPageState extends State<TBAutoModeListPage> {
           Icons.add,
           color: Colors.white,
         ),
-        onPressed: _isAquaculture ? _showModeTypeDialog : () => _viewModeDetail(mode: _generateNewATMode()),
+        onPressed: _isAquaculture
+            ? _showModeTypeDialog
+            : _isIrrigation
+                ? _showIrrigationModeTypeDialog
+                : () => _viewModeDetail(mode: _generateNewATMode()),
       ),
       body: LoadingWidget(
         error: _vm.errorTracker.asAppError(),
@@ -138,6 +143,87 @@ class _TBAutoModeListPageState extends State<TBAutoModeListPage> {
       steps: [],
       lotList: [],
     );
+  }
+
+  Future<void> _showIrrigationModeTypeDialog() async {
+    final type = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(
+          "Chọn loại chế độ",
+          style: AppTheme.textStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, TBModeType.timer),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.timer, color: AppTheme.primaryColor),
+                  const SizedBox(width: 12),
+                  Text(
+                    "Tưới theo thời gian",
+                    style: AppTheme.textStyle(fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, TBModeType.soilMoisture),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.water_drop, color: AppTheme.primaryColor),
+                  const SizedBox(width: 12),
+                  Text(
+                    "Kiểm soát độ ẩm đất",
+                    style: AppTheme.textStyle(fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, TBModeType.fertilizer),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.science_outlined, color: AppTheme.primaryColor),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Châm phân tự động",
+                        style: AppTheme.textStyle(fontSize: 16),
+                      ),
+                      Text(
+                        "(Đang phát triển)",
+                        style: AppTheme.textStyle(
+                          fontSize: 12,
+                          color: AppTheme.$A3A3A3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (type != null) {
+      _viewModeDetail(mode: _generateNewATMode(modeType: type));
+    }
   }
 
   Future<void> _showModeTypeDialog() async {

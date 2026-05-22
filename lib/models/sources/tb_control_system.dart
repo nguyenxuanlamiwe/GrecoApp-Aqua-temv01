@@ -36,6 +36,9 @@ class TBControlSystem {
   @JsonKey(defaultValue: false)
   bool hasCamera;
 
+  @JsonKey(defaultValue: false)
+  bool hasSuggestion;
+
   @JsonKey(includeFromJson: false, includeToJson: false)
   late final List<TBComponent> booleanComponents = (groups + hyrdromets)
       .expand((g) => g.components)
@@ -60,6 +63,7 @@ class TBControlSystem {
     this.appType,
     this.weatherForcast,
     this.hasCamera,
+    this.hasSuggestion,
   );
 
   factory TBControlSystem.fromJson(Map<String, dynamic> json) =>

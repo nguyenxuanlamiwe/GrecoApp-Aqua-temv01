@@ -6,4 +6,6 @@ class LocalStoreKey {
   static const prevUsername = "prevUsername";
   static const prevPassword = "prevPassword";
   static const saveLoginInfo = "saveLoginInfo";
+  // per-device optional features (List<String>)
+  static String systemFeatures(String deviceId) => "features_$deviceId";
 }

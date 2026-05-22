@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:zen8app/app/pages/iot/tb_auto_mode/tb_auto_mode_page.dart';
+import 'package:zen8app/app/pages/iot/ui_config/ui_config_page.dart';
 import 'package:zen8app/app/pages/main/home_vm.dart';
 import 'package:zen8app/core/core.dart';
 import 'package:zen8app/models/models.dart';
@@ -224,6 +225,27 @@ class _HomePageState extends State<HomePage> {
                     _attributeWidget(attr),
                   ],
                 ),
+                if (Session.currentUser?.authority == TBAuthority.tenantAdmin) ...[
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () async {
+                        final saved = await context.pushRoute<bool>(UIConfigRoute(farm: farm));
+                        if (saved == true) _vm.input.reload.add(null);
+                      },
+                      icon: const Icon(Icons.tune, size: 16),
+                      label: const Text('Cấu hình giao diện',
+                          style: TextStyle(fontSize: 12)),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        foregroundColor: AppTheme.primaryColor,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           )

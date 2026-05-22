@@ -19,7 +19,10 @@ class TBAutoControlPage extends StatefulWidget {
   State<TBAutoControlPage> createState() => _TBAutoControlPageState();
 }
 
-class _TBAutoControlPageState extends State<TBAutoControlPage> {
+class _TBAutoControlPageState extends State<TBAutoControlPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   late final _vm = TBAutoControlVM(widget.system);
   final _rxBag = CompositeSubscription();
 
@@ -36,6 +39,7 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
   };
 
   bool get _isAquaculture => widget.system.appType == "aquaculture";
+  bool get _isIrrigation => widget.system.appType == "irrigation";
 
   var _currentValues = <String, dynamic>{};
   var _autoLots = <int, Map<String, dynamic>>{}; // id -> {st}
@@ -71,7 +75,7 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
     _vm.output.reloadedValues.listen((values) {
       setState(() {
         _currentValues = values;
-        _syncAutoLots(values);
+        _syncAutoLots(values, isReload: true);
       });
     }).addTo(_rxBag);
 
@@ -85,7 +89,7 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
               "lastUpdateTs": DateTime.now().millisecondsSinceEpoch,
             }
         });
-        _syncAutoLots(updatedValues);
+        _syncAutoLots(updatedValues, isReload: false);
       });
     }).addTo(_rxBag);
 
@@ -96,10 +100,9 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
     _vm.input.reload.add(null);
   }
 
-  void _syncAutoLots(Map<String, dynamic> values) {
+  void _syncAutoLots(Map<String, dynamic> values, {bool isReload = false}) {
     if (values.containsKey("autoLots")) {
       _parseAutoLotsData(values["autoLots"]);
-      return;
     }
 
     final autoEnable = values["autoEnable"];
@@ -140,6 +143,7 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     return Scaffold(
       backgroundColor: AppTheme.$F5F5F5,
       body: SafeArea(
@@ -163,6 +167,10 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
     var atMode = _modesMap[_currentATSys?.moId];
     if (_isAquaculture && atMode != null && atMode.isAquacultureMode) {
       return _aquacultureListWidget(atMode);
+    }
+    if (_isIrrigation && atMode != null &&
+        (atMode.isIrrigationLotMode || atMode.modeType == TBModeType.timer)) {
+      return _irrigationLotListWidget(atMode);
     }
     var steps = atMode?.steps ?? [];
     var isAutoEnable = _getBooleanComponentValue("autoEnable");
@@ -214,6 +222,31 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
                 'Thời gian bắt đầu:',
                 _currentATSys!.startTime!.ex
                     .asString(DatePattern.ddMMyyyyHHmm),
+              ),
+          ] else if (_isIrrigation) ...[
+            if ((_currentATSys?.isPrMaintainEnabled ?? false) &&
+                (_currentATSys?.prMaintainValue != null))
+              _doubleTextWidget('Áp suất tối thiểu:',
+                  "${_currentATSys?.prMaintainValue ?? 0}(bar)"),
+            if (_currentATSys?.safeAtpress != null)
+              _doubleTextWidget(
+                  'Áp suất tối đa:',
+                  "${_currentATSys?.safeAtpress ?? 0}(bar)"),
+            if (_currentATSys?.startTime != null)
+              _doubleTextWidget(
+                'Thời gian bắt đầu:',
+                _currentATSys!.startTime!.ex
+                    .asString(DatePattern.ddMMyyyyHHmm),
+              ),
+            if (_currentATSys?.scheduleType != null)
+              _doubleTextWidget(
+                'Chu kỳ:',
+                switch (_currentATSys!.scheduleType) {
+                  'daily' => 'Hàng ngày',
+                  'weekly' => 'Hàng tuần',
+                  'monthly' => 'Hàng tháng',
+                  _ => 'Một lần',
+                },
               ),
           ] else ...[
             if ((_currentATSys?.isPrMaintainEnabled ?? false) &&
@@ -342,6 +375,10 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
                   setState(() {
                     _currentValues["autoEnable"] = {"value": newValue};
                   });
+                  // Broadcast to EventBus so other tabs (e.g. manual) stay in sync
+                  DI.resolveSingleton<EventBus>().mqttUpdates.add({
+                    widget.system.accessToken: {"autoEnable": newValue},
+                  });
                   // Send one-way RPC in background
                   _vm.input.autoEnable.add(newValue);
                 },
@@ -405,6 +442,184 @@ class _TBAutoControlPageState extends State<TBAutoControlPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ==================== IRRIGATION LOT MONITORING ====================
+
+  Widget _irrigationLotListWidget(TBATMode atMode) {
+    final auActProId = _currentValues["auActProId"]?["value"] as int?;
+    return ListView(
+      children: [
+        _groupHeaderWidget(),
+        for (var lotConfig in atMode.lotList) ...[
+          if (atMode.modeType == TBModeType.timer)
+            _irrigationTimerLotMonitorWidget(lotConfig, auActProId)
+          else if (atMode.modeType == TBModeType.soilMoisture)
+            _smLotMonitorWidget(lotConfig, auActProId)
+          else
+            _irrigationTimerLotMonitorWidget(lotConfig, auActProId),
+          const Divider(height: 1),
+        ],
+      ],
+    );
+  }
+
+  /// Irrigation timer lot: dùng auActProId để xác định lô đang chạy
+  Widget _irrigationTimerLotMonitorWidget(TBLotConfig lotConfig, int? auActProId) {
+    final lot = _lotsMap[lotConfig.id];
+    final lotName = lot?.name ?? "Lô ${lotConfig.id}";
+    final autoEnable = _getBooleanComponentValue("autoEnable");
+
+    // Đọc tIriAuto{idx} từ iriAutoIndex của lot
+    double? tIriAutoValue;
+    final iriIdx = lotConfig.iriAutoIndex
+        ?? (lotConfig.rlc.isNotEmpty ? lotConfig.rlc.first : null); // fallback
+    if (iriIdx != null) {
+      final raw = _currentValues["tIriAuto$iriIdx"];
+      final val = raw is Map ? raw["value"] : raw;
+      tIriAutoValue = (val as num?)?.toDouble();
+    }
+    final configuredMins = lotConfig.mins;
+
+    // Đang chạy: auActProId trùng với id của lô này
+    final isRunning = autoEnable && auActProId == lotConfig.id;
+    // Kết thúc: tIriAuto >= mins và không phải đang chạy
+    final isDone = !isRunning &&
+        tIriAutoValue != null &&
+        configuredMins != null &&
+        tIriAutoValue >= configuredMins;
+
+    String timeText;
+    if (tIriAutoValue != null && configuredMins != null) {
+      timeText = "${tIriAutoValue.toStringAsFixed(1)} / ${configuredMins.toStringAsFixed(1)} phút";
+    } else if (tIriAutoValue != null) {
+      timeText = "${tIriAutoValue.toStringAsFixed(1)} phút";
+    } else if (configuredMins != null) {
+      timeText = "0.0 / ${configuredMins.toStringAsFixed(1)} phút";
+    } else {
+      timeText = "-- phút";
+    }
+
+    return ListTile(
+      tileColor: isRunning ? const Color(0xFFEDF4F0) : Colors.white,
+      minLeadingWidth: 16,
+      leading: isRunning
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppTheme.primaryColor,
+              ),
+            )
+          : null,
+      title: Text(
+        lotName,
+        style: AppTheme.textStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: isRunning
+              ? AppTheme.primaryColor
+              : (isDone ? Colors.grey : null),
+        ),
+      ),
+      subtitle: tIriAutoValue != null || configuredMins != null
+          ? Text(
+              "Thời gian chạy",
+              style: AppTheme.textStyle(
+                fontSize: 11,
+                color: isRunning ? AppTheme.primaryColor : AppTheme.$A3A3A3,
+              ),
+            )
+          : null,
+      trailing: Text(
+        timeText,
+        style: AppTheme.textStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: isDone
+              ? Colors.grey
+              : (isRunning ? AppTheme.primaryColor : AppTheme.$3A3A3A),
+        ),
+      ),
+    );
+  }
+
+  Widget _smLotMonitorWidget(TBLotConfig lotConfig, int? auActProId) {
+    final lot = _lotsMap[lotConfig.id];
+    final lotName = lot?.name ?? "Lô ${lotConfig.id}";
+    final autoEnable = _getBooleanComponentValue("autoEnable");
+    final isRunning = autoEnable && auActProId == lotConfig.id;
+
+    // Đọc smMin/smAvg/smMax từ MQTT attributes
+    double? smMin, smAvg, smMax;
+    if (isRunning) {
+      final rawMin = _currentValues["smMin"];
+      final rawAvg = _currentValues["smAvg"];
+      final rawMax = _currentValues["smMax"];
+      smMin = ((rawMin is Map ? rawMin["value"] : rawMin) as num?)?.toDouble();
+      smAvg = ((rawAvg is Map ? rawAvg["value"] : rawAvg) as num?)?.toDouble();
+      smMax = ((rawMax is Map ? rawMax["value"] : rawMax) as num?)?.toDouble();
+    }
+
+    final statsText = (smMin != null && smAvg != null && smMax != null)
+        ? "${smMin.toStringAsFixed(1)} | ${smAvg.toStringAsFixed(1)} | ${smMax.toStringAsFixed(1)}"
+        : "-- | -- | --";
+
+    final thresholdText = (lotConfig.smEndEnabled && lotConfig.smEnd != null)
+        ? "≤ ${lotConfig.smStart ?? '--'}% → ≥ ${lotConfig.smEnd}%"
+        : "≤ ${lotConfig.smStart ?? '--'}%";
+
+    return ListTile(
+      tileColor: isRunning ? const Color(0xFFEDF4F0) : Colors.white,
+      minLeadingWidth: 16,
+      leading: isRunning
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppTheme.primaryColor,
+              ),
+            )
+          : null,
+      title: Text(
+        lotName,
+        style: AppTheme.textStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: isRunning ? AppTheme.primaryColor : null,
+        ),
+      ),
+      subtitle: Text(
+        thresholdText,
+        style: AppTheme.textStyle(
+          fontSize: 12,
+          color: isRunning ? AppTheme.primaryColor : AppTheme.$A3A3A3,
+        ),
+      ),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            "min | TB | max",
+            style: AppTheme.textStyle(
+              fontSize: 11,
+              color: isRunning ? AppTheme.primaryColor : AppTheme.$A3A3A3,
+            ),
+          ),
+          Text(
+            statsText,
+            style: AppTheme.textStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: isRunning ? AppTheme.primaryColor : AppTheme.$3A3A3A,
+            ),
+          ),
+        ],
       ),
     );
   }

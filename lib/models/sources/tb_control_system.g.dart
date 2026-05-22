@@ -19,11 +19,10 @@ TBControlSystem _$TBControlSystemFromJson(Map<String, dynamic> json) =>
               ?.map((e) => TBGroup.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
-      (json['camera'] is List)
-          ? (json['camera'] as List<dynamic>)
-              .map((e) => TBCamera.fromJson(e as Map<String, dynamic>))
-              .toList()
-          : [],
+      (json['camera'] as List<dynamic>?)
+              ?.map((e) => TBCamera.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
       (json['crop'] as List<dynamic>?)
               ?.map((e) => TBCrop.fromJson(e as Map<String, dynamic>))
               .toList() ??
@@ -31,7 +30,8 @@ TBControlSystem _$TBControlSystemFromJson(Map<String, dynamic> json) =>
       (json['soil'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [],
       json['appType'] as String? ?? '',
       json['weatherForcast'] as bool? ?? false,
-      (json['camera'] is bool) ? (json['camera'] as bool) : (json['camera'] is List && (json['camera'] as List).isNotEmpty),
+      json['hasCamera'] as bool? ?? false,
+      json['hasSuggestion'] as bool? ?? false,
     );
 
 Map<String, dynamic> _$TBControlSystemToJson(TBControlSystem instance) =>
@@ -46,4 +46,6 @@ Map<String, dynamic> _$TBControlSystemToJson(TBControlSystem instance) =>
       'soil': instance.soil,
       'appType': instance.appType,
       'weatherForcast': instance.weatherForcast,
+      'hasCamera': instance.hasCamera,
+      'hasSuggestion': instance.hasSuggestion,
     };

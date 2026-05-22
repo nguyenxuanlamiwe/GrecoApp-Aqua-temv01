@@ -398,4 +398,15 @@ class TBService {
       },
     ).onErrorReturn([]);
   }
+
+  Stream<void> saveFarmConfig(
+      String assetId, List<TBControlSystem> config) {
+    return Session.tbClient.ex
+        .postStream(
+          "/api/plugins/telemetry/ASSET/$assetId/SERVER_SCOPE",
+          data: jsonEncode(
+              {"farmConfig": config.map((e) => e.toJson()).toList()}),
+        )
+        .map((_) => null);
+  }
 }

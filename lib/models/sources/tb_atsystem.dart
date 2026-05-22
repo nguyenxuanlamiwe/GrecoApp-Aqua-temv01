@@ -3,8 +3,9 @@ class TBATSystem {
   double? prMaintainValue;
   double? safeAtpress;
   int? moId;
-  DateTime? startTime; // for aquaculture
-  bool startNow; // for aquaculture: send "now" instead of datetime
+  DateTime? startTime; // for aquaculture / irrigation
+  bool startNow; // send "now" instead of datetime
+  String? scheduleType; // irrigation only: "onetime" | "daily" | "weekly" | "monthly"
 
   TBATSystem({
     required this.isPrMaintainEnabled,
@@ -13,6 +14,7 @@ class TBATSystem {
     required this.moId,
     this.startTime,
     this.startNow = false,
+    this.scheduleType,
   });
 
   TBATSystem.empty()
@@ -23,6 +25,7 @@ class TBATSystem {
           moId: null,
           startTime: null,
           startNow: false,
+          scheduleType: null,
         );
 
   TBATSystem copy() => TBATSystem(
@@ -32,6 +35,7 @@ class TBATSystem {
         moId: moId,
         startTime: startTime,
         startNow: startNow,
+        scheduleType: scheduleType,
       );
 
   factory TBATSystem.fromJson(Map<String, dynamic> json) {
@@ -64,7 +68,32 @@ class TBATSystem {
       moId: moId,
       startTime: startTime,
       startNow: startNow,
+      scheduleType: json["scheduleType"] as String?,
     );
+  }
+
+  /// For irrigation: pressure fields + startTime + scheduleType
+  Map<String, dynamic> toIrrigationJson() {
+    final result = <String, dynamic>{"moId": moId};
+    result["prMaintain"] = {
+      "enable": isPrMaintainEnabled,
+      "value": prMaintainValue ?? 0,
+    };
+    if (safeAtpress != null) result["safeAtpress"] = safeAtpress;
+    if (scheduleType != null) result["scheduleType"] = scheduleType;
+    if (startNow) {
+      result["startTime"] = "now";
+    } else if (startTime != null) {
+      result["startTime"] = [
+        startTime!.year,
+        startTime!.month,
+        startTime!.day,
+        startTime!.hour,
+        startTime!.minute,
+        0,
+      ];
+    }
+    return result;
   }
 
   /// For aquaculture: produces {"moId": x, "startTime": "now" or [y,m,d,h,m,0]}
@@ -85,10 +114,16 @@ class TBATSystem {
     return result;
   }
 
-  /// For irrigation: full format with pressure fields
+  /// Full JSON with all fields (used by jsonEncode in the service layer)
   Map<String, dynamic> toJson() {
     var results = <String, dynamic>{};
     results["moId"] = moId;
+    results["prMaintain"] = {
+      "enable": isPrMaintainEnabled,
+      "value": prMaintainValue ?? 0,
+    };
+    if (safeAtpress != null) results["safeAtpress"] = safeAtpress;
+    if (scheduleType != null) results["scheduleType"] = scheduleType;
     if (startNow) {
       results["startTime"] = "now";
     } else if (startTime != null) {

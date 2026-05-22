@@ -40,7 +40,7 @@ class TBAuthenticator extends Authenticator<TBCredential> {
       return credential;
     }).catchError((e) {
       Session.endAuthenticatedSession(
-          reason: 'Can not refresh thingsboard token');
+          reason: 'Không thể làm mới phiên đăng nhập');
     });
   }
 }

@@ -10,6 +10,7 @@ import 'package:zen8app/app/pages/auth/login/login_page.dart';
 import 'package:zen8app/app/pages/main/home_page.dart';
 import 'package:zen8app/app/pages/main/map/map_page.dart';
 import 'package:zen8app/app/pages/iot/tb_atsystem_config/tb_atsystem_config_page.dart';
+import 'package:zen8app/app/pages/iot/ui_config/ui_config_page.dart';
 export 'package:auto_route/auto_route.dart';
 
 part 'router.gr.dart';
@@ -36,5 +37,6 @@ class AppRouter extends _$AppRouter {
     AutoRoute(page: TBAutoModeRoute.page),
     AutoRoute(page: TBATSystemConfigRoute.page),
     AutoRoute(page: MapRoute.page),
+    AutoRoute(page: UIConfigRoute.page),
   ];
 }

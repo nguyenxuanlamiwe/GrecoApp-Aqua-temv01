@@ -18,7 +18,10 @@ class TBManualControlPage extends StatefulWidget {
   State<TBManualControlPage> createState() => _TBManualControlPageState();
 }
 
-class _TBManualControlPageState extends State<TBManualControlPage> {
+class _TBManualControlPageState extends State<TBManualControlPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   late final _vm = TBManualControlVM(widget.system);
   final _rxBag = CompositeSubscription();
   var _currentValues = <String, dynamic>{};
@@ -75,6 +78,7 @@ class _TBManualControlPageState extends State<TBManualControlPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     return Scaffold(
       backgroundColor: AppTheme.$F5F5F5,
       body: LoadingWidget(
