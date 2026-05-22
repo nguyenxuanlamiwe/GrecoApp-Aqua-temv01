@@ -13,9 +13,9 @@ workflows:
         BUNDLE_ID: "com.greco.aqua.production" # Update with your actual bundle ID
         APP_STORE_APPLE_ID: 1234567890 # Update with your App Store ID
     scripts:
-      - name: Set up code signing settings on Xcode project
-        script: |
-          xcode-project use-profiles
+      # - name: Set up code signing settings on Xcode project
+      #   script: |
+      #     xcode-project use-profiles
       - name: Get Flutter packages
         script: |
           flutter packages pub get
@@ -25,10 +25,10 @@ workflows:
       - name: Flutter build IPA
         script: |
           flutter build ipa --release \
+            --flavor prod \
             --target=lib/_main/main_prod.dart \
             --build-name=1.0.0 \
-            --build-number=$BUILD_NUMBER \
-            --export-options-plist=/Users/builder/export_options.plist
+            --build-number=$BUILD_NUMBER
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -68,12 +68,14 @@ workflows:
       - name: Build Android APK
         script: |
           flutter build apk --release \
+            --flavor prod \
             --target=lib/_main/main_prod.dart \
             --build-name=1.0.0 \
             --build-number=$BUILD_NUMBER
       - name: Build Android App Bundle (AAB)
         script: |
           flutter build appbundle --release \
+            --flavor prod \
             --target=lib/_main/main_prod.dart \
             --build-name=1.0.0 \
             --build-number=$BUILD_NUMBER
@@ -120,10 +122,10 @@ workflows:
           flutter packages pub get
       - name: Build Android APK
         script: |
-          flutter build apk --release --target=lib/_main/main_prod.dart
+          flutter build apk --release --flavor prod --target=lib/_main/main_prod.dart
       - name: Build iOS (requires Mac instance)
         script: |
-          flutter build ios --release --target=lib/_main/main_prod.dart --no-codesign
+          flutter build ios --release --flavor prod --target=lib/_main/main_prod.dart --no-codesign
     artifacts:
       - build/app/outputs/**/*.apk
       - build/ios/iphoneos/*.app
