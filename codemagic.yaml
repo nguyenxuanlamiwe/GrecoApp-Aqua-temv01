@@ -1,0 +1,136 @@
+workflows:
+  ios-release:
+    name: iOS Production Build
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      groups:
+        - app_store_credentials # Add your credentials in Codemagic UI
+      vars:
+        BUNDLE_ID: "com.greco.aqua.production" # Update with your actual bundle ID
+        APP_STORE_APPLE_ID: 1234567890 # Update with your App Store ID
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: |
+          xcode-project use-profiles
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Install pods
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+      - name: Flutter build IPA
+        script: |
+          flutter build ipa --release \
+            --target=lib/_main/main_prod.dart \
+            --build-name=1.0.0 \
+            --build-number=$BUILD_NUMBER \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com # Update with your email
+        notify:
+          success: true
+          failure: true
+      # Uncomment below to publish to TestFlight
+      # app_store_connect:
+      #   api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+      #   key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+      #   issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+      #   submit_to_testflight: true
+
+  android-release:
+    name: Android Production Build
+    max_build_duration: 120
+    instance_type: linux_x2
+    environment:
+      flutter: stable
+      java: 21
+      groups:
+        - android_credentials # Add your credentials in Codemagic UI
+      vars:
+        PACKAGE_NAME: "com.greco.aqua.production" # Update with your package name
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Build Android APK
+        script: |
+          flutter build apk --release \
+            --target=lib/_main/main_prod.dart \
+            --build-name=1.0.0 \
+            --build-number=$BUILD_NUMBER
+      - name: Build Android App Bundle (AAB)
+        script: |
+          flutter build appbundle --release \
+            --target=lib/_main/main_prod.dart \
+            --build-name=1.0.0 \
+            --build-number=$BUILD_NUMBER
+    artifacts:
+      - build/app/outputs/**/*.apk
+      - build/app/outputs/**/*.aab
+      - build/app/outputs/**/mapping.txt
+      - flutter_drive.log
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com # Update with your email
+        notify:
+          success: true
+          failure: true
+      # Uncomment below to publish to Google Play
+      # google_play:
+      #   credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+      #   track: internal
+      #   submit_as_draft: true
+
+  # Workflow for both platforms
+  full-release:
+    name: iOS & Android Production Build
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'master'
+          include: true
+          source: true
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+    environment:
+      flutter: stable
+      xcode: latest
+      java: 21
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Build Android APK
+        script: |
+          flutter build apk --release --target=lib/_main/main_prod.dart
+      - name: Build iOS (requires Mac instance)
+        script: |
+          flutter build ios --release --target=lib/_main/main_prod.dart --no-codesign
+    artifacts:
+      - build/app/outputs/**/*.apk
+      - build/ios/iphoneos/*.app
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: true
+          failure: true
