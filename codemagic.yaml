@@ -1,4 +1,36 @@
 workflows:
+  ios-debug:
+    name: iOS Debug Build (No Code Signing)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Install pods
+        script: |
+          cd ios && pod install && cd ..
+      - name: Flutter build iOS (no codesign)
+        script: |
+          flutter build ios --release \
+            --flavor prod \
+            --target=lib/_main/main_prod.dart \
+            --no-codesign
+    artifacts:
+      - build/ios/iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: true
+          failure: true
+
   ios-release:
     name: iOS Production Build
     max_build_duration: 120
