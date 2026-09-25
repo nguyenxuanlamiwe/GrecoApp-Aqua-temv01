@@ -202,6 +202,120 @@ class TBService {
         );
   }
 
+  Stream<List<TBComponent>> getDeviceConfig(String deviceId) {
+    // Get deviceConfig from device attributes (same endpoint as ATsys/ATmode)
+    return Session.tbClient.ex.getStream(
+      "/api/plugins/telemetry/DEVICE/$deviceId/values/attributes",
+      queryParameters: {"keys": "deviceConfig"},
+    ).decode((json) {
+      try {
+        if (json.isEmpty) return [];
+        
+        final deviceConfigValue = json[0]["value"];
+        
+        if (deviceConfigValue is! Map) return [];
+        
+        List<TBComponent> components = [];
+        
+        // Parse relay devices (actuators)
+        if (deviceConfigValue.containsKey('relay') && 
+            deviceConfigValue['relay'] is Map &&
+            deviceConfigValue['relay']['devices'] is List) {
+          final relayDevices = deviceConfigValue['relay']['devices'] as List;
+          for (var device in relayDevices) {
+            if (device is Map) {
+              components.add(TBComponent(
+                variable: 'rlc${device['id']}',
+                nameDevice: device['device_name'] ?? 'Relay ${device['id']}',
+                type: 'actuator',
+                dataType: 'boolean',
+                unit: null,
+                relayType: device['relay_type'] as int?,
+              ));
+            }
+          }
+        }
+        
+        // Parse timer devices (sensors)
+        if (deviceConfigValue.containsKey('timer') && 
+            deviceConfigValue['timer'] is Map &&
+            deviceConfigValue['timer']['timers'] is List) {
+          final timers = deviceConfigValue['timer']['timers'] as List;
+          for (var timer in timers) {
+            if (timer is Map) {
+              components.add(TBComponent(
+                variable: 'tIriAuto${timer['id']}',
+                nameDevice: timer['device_name'] ?? 'Timer ${timer['id']}',
+                type: 'sensor',
+                dataType: 'float',
+                unit: 'phút',
+              ));
+            }
+          }
+        }
+        
+        // Parse analog input sensors
+        if (deviceConfigValue.containsKey('analog_input') && 
+            deviceConfigValue['analog_input'] is Map &&
+            deviceConfigValue['analog_input']['inputs'] is List) {
+          final analogInputs = deviceConfigValue['analog_input']['inputs'] as List;
+          for (var input in analogInputs) {
+            if (input is Map) {
+              components.add(TBComponent(
+                variable: 'ai${input['id']}',
+                nameDevice: input['device_name'] ?? 'Analog ${input['id']}',
+                type: 'sensor',
+                dataType: 'float',
+                unit: null,
+              ));
+            }
+          }
+        }
+        
+        // Parse digital input sensors
+        if (deviceConfigValue.containsKey('digital_input') && 
+            deviceConfigValue['digital_input'] is Map &&
+            deviceConfigValue['digital_input']['inputs'] is List) {
+          final digitalInputs = deviceConfigValue['digital_input']['inputs'] as List;
+          for (var input in digitalInputs) {
+            if (input is Map) {
+              components.add(TBComponent(
+                variable: 'di${input['id']}',
+                nameDevice: input['device_name'] ?? 'Digital ${input['id']}',
+                type: 'sensor',
+                dataType: 'float',
+                unit: null,
+              ));
+            }
+          }
+        }
+        
+        // Parse modbus sensors
+        if (deviceConfigValue.containsKey('modbus') && 
+            deviceConfigValue['modbus'] is Map &&
+            deviceConfigValue['modbus']['parameters'] is List) {
+          final modbusParams = deviceConfigValue['modbus']['parameters'] as List;
+          for (var param in modbusParams) {
+            if (param is Map) {
+              components.add(TBComponent(
+                variable: 'modbus${param['cid']}',
+                nameDevice: param['param_name'] ?? 'Modbus ${param['cid']}',
+                type: 'sensor',
+                dataType: 'float',
+                unit: param['unit'],
+              ));
+            }
+          }
+        }
+        
+        return components;
+      } catch (e) {
+        print('Error parsing deviceConfig: $e');
+        return [];
+      }
+    });
+  }
+
   Stream<Map<String, dynamic>> getSensorValues(
       String deviceId, List<String>? keys) {
     var queryParams = <String, dynamic>{

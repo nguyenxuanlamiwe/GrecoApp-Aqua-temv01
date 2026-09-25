@@ -42,7 +42,7 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
   bool get _isIrrigation => widget.system.appType == "irrigation";
 
   var _currentValues = <String, dynamic>{};
-  var _autoLots = <int, Map<String, dynamic>>{}; // id -> {st}
+  var _autoLots = <int, Map<String, dynamic>>{}; // lotId -> DO: {auActProId, doMin, doAvg, doMax, aerating}
 
   @override
   void initState() {
@@ -101,8 +101,28 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
   }
 
   void _syncAutoLots(Map<String, dynamic> values, {bool isReload = false}) {
+    // Case 1: autoLots array (Timer mode hoặc reload full data)
     if (values.containsKey("autoLots")) {
       _parseAutoLotsData(values["autoLots"]);
+    }
+    
+    // Case 2: DO mode - device gửi trực tiếp từng lô {auActProId, doMin, doAvg, doMax, aerating}
+    else if (values.containsKey("auActProId")) {
+      final lotId = _asInt(values["auActProId"]);
+      if (lotId != null) {
+        // MERGE data thay vì overwrite - giữ lại các field cũ
+        final existingData = _autoLots[lotId] ?? <String, dynamic>{};
+        
+        // Extract data từ message và merge vào existing (DO mode + Timer mode)
+        for (var key in ['auActProId', 'doMin', 'doAvg', 'doMax', 'aerating', 'time']) {
+          if (values.containsKey(key)) {
+            final val = values[key];
+            existingData[key] = val is Map ? val["value"] : val;
+          }
+        }
+        
+        _autoLots[lotId] = existingData;
+      }
     }
 
     final autoEnable = values["autoEnable"];
@@ -122,12 +142,17 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
       list = raw;
     }
     if (list != null) {
-      _autoLots = {
-        for (var item in list)
-          if (item is Map)
-            if (_asInt(item["id"]) != null)
-              _asInt(item["id"])!: Map<String, dynamic>.from(item as Map)
-      };
+      final Map<int, Map<String, dynamic>> result = {};
+      for (var item in list) {
+        if (item is Map) {
+          // Timer mode và DO mode đều dùng "auActProId" (hoặc fallback "id")
+          final lotId = _asInt(item["auActProId"]) ?? _asInt(item["id"]);
+          if (lotId != null) {
+            result[lotId] = Map<String, dynamic>.from(item as Map);
+          }
+        }
+      }
+      _autoLots = result;
     }
   }
 
@@ -217,11 +242,20 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
             ),
           ),
           if (_isAquaculture) ...[
-            if (_currentATSys?.startTime != null)
+            // Hiển thị thời gian bắt đầu: ngay lập tức hoặc thời điểm cụ thể
+            if (_currentATSys?.startNow == true)
+              _doubleTextWidget('Thời gian bắt đầu:', 'Ngay lập tức')
+            else if (_currentATSys?.startTime != null)
               _doubleTextWidget(
                 'Thời gian bắt đầu:',
                 _currentATSys!.startTime!.ex
                     .asString(DatePattern.ddMMyyyyHHmm),
+              ),
+            // Hiển thị chế độ lặp lại từ intervalMinutes
+            if (_currentATSys?.intervalMinutes != null)
+              _doubleTextWidget(
+                'Chế độ lặp lại:',
+                _formatRepeatInterval(_currentATSys!.intervalMinutes!),
               ),
           ] else if (_isIrrigation) ...[
             if ((_currentATSys?.isPrMaintainEnabled ?? false) &&
@@ -232,12 +266,16 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
               _doubleTextWidget(
                   'Áp suất tối đa:',
                   "${_currentATSys?.safeAtpress ?? 0}(bar)"),
-            if (_currentATSys?.startTime != null)
+            // Hiển thị thời gian bắt đầu: ngay lập tức hoặc thời điểm cụ thể
+            if (_currentATSys?.startNow == true)
+              _doubleTextWidget('Thời gian bắt đầu:', 'Ngay lập tức')
+            else if (_currentATSys?.startTime != null)
               _doubleTextWidget(
                 'Thời gian bắt đầu:',
                 _currentATSys!.startTime!.ex
                     .asString(DatePattern.ddMMyyyyHHmm),
               ),
+            // Hiển thị chu kỳ từ scheduleType (legacy)
             if (_currentATSys?.scheduleType != null)
               _doubleTextWidget(
                 'Chu kỳ:',
@@ -247,6 +285,12 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
                   'monthly' => 'Hàng tháng',
                   _ => 'Một lần',
                 },
+              ),
+            // Hiển thị chế độ lặp lại từ intervalMinutes
+            if (_currentATSys?.intervalMinutes != null)
+              _doubleTextWidget(
+                'Chế độ lặp lại:',
+                _formatRepeatInterval(_currentATSys!.intervalMinutes!),
               ),
           ] else ...[
             if ((_currentATSys?.isPrMaintainEnabled ?? false) &&
@@ -458,6 +502,8 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
             _irrigationTimerLotMonitorWidget(lotConfig, auActProId)
           else if (atMode.modeType == TBModeType.soilMoisture)
             _smLotMonitorWidget(lotConfig, auActProId)
+          else if (atMode.modeType == TBModeType.fertilizer)
+            _fertilizerLotMonitorWidget(lotConfig, auActProId)
           else
             _irrigationTimerLotMonitorWidget(lotConfig, auActProId),
           const Divider(height: 1),
@@ -624,6 +670,140 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
     );
   }
 
+  /// Fertilizer mode: hiển thị lượng phân trên các kênh so với target
+  Widget _fertilizerLotMonitorWidget(TBLotConfig lotConfig, int? auActProId) {
+    final lot = _lotsMap[lotConfig.id];
+    final lotName = lot?.name ?? "Lô ${lotConfig.id}";
+    final autoEnable = _getBooleanComponentValue("autoEnable");
+    final isRunning = autoEnable && auActProId == lotConfig.id;
+
+    // Đọc giá trị current từ di{channel} cho từng kênh phân
+    final channelData = <Map<String, dynamic>>[];
+    var totalCurrent = 0.0;
+    var totalTarget = 0.0;
+    var allChannelsComplete = true;
+
+    for (var entry in lotConfig.fertilizerChannels.entries) {
+      final channel = entry.key;
+      final targetLiters = entry.value;
+      totalTarget += targetLiters;
+
+      // Đọc giá trị current từ di{channel}
+      final raw = _currentValues["di$channel"];
+      final val = raw is Map ? raw["value"] : raw;
+      final currentLiters = (val as num?)?.toDouble() ?? 0.0;
+      totalCurrent += currentLiters;
+
+      if (currentLiters < targetLiters) {
+        allChannelsComplete = false;
+      }
+
+      // Lấy tên kênh từ components
+      final channelName = _componentsMap["di$channel"]?.nameDevice ?? "Kênh $channel";
+
+      channelData.add({
+        'name': channelName,
+        'current': currentLiters,
+        'target': targetLiters,
+        'complete': currentLiters >= targetLiters,
+      });
+    }
+
+    final isDone = !isRunning && allChannelsComplete;
+
+    return Container(
+      color: isRunning ? const Color(0xFFEDF4F0) : Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header: Tên lô + tổng kết
+          Row(
+            children: [
+              if (isRunning)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.primaryColor,
+                  ),
+                )
+              else if (isDone)
+                const Icon(
+                  Icons.check_circle,
+                  size: 16,
+                  color: AppTheme.primaryColor,
+                ),
+              if (isRunning || isDone) const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  lotName,
+                  style: AppTheme.textStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: isRunning ? AppTheme.primaryColor : null,
+                  ),
+                ),
+              ),
+              Text(
+                "${totalCurrent.toStringAsFixed(1)} / ${totalTarget.toStringAsFixed(1)} lít",
+                style: AppTheme.textStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isRunning ? AppTheme.primaryColor : AppTheme.$3A3A3A,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Chi tiết từng kênh
+          ...channelData.map((data) {
+            final name = data['name'] as String;
+            final current = data['current'] as double;
+            final target = data['target'] as double;
+            final complete = data['complete'] as bool;
+            
+            return Padding(
+              padding: const EdgeInsets.only(left: 24, top: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: AppTheme.textStyle(
+                        fontSize: 13,
+                        color: isRunning ? AppTheme.primaryColor : AppTheme.$666666,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    "${current.toStringAsFixed(1)} / ${target.toStringAsFixed(1)} lít",
+                    style: AppTheme.textStyle(
+                      fontSize: 13,
+                      color: complete
+                          ? AppTheme.primaryColor
+                          : (isRunning ? AppTheme.primaryColor : AppTheme.$666666),
+                    ),
+                  ),
+                  if (complete)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 4),
+                      child: Icon(
+                        Icons.check,
+                        size: 14,
+                        color: AppTheme.primaryColor,
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
   // ==================== AQUACULTURE MONITORING ====================
 
   Widget _aquacultureListWidget(TBATMode atMode) {
@@ -644,11 +824,32 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
   Widget _timerLotMonitorWidget(TBLotConfig lotConfig) {
     final lot = _lotsMap[lotConfig.id];
     final lotName = lot?.name ?? "Lot ${lotConfig.id}";
-    final autoLot = _autoLots[lotConfig.id];
+    final autoLot = _autoLots[lotConfig.id]; // Data từ device: {auActProId, time, aerating}
     final autoEnable = _getBooleanComponentValue("autoEnable");
-    final isRunning = autoEnable && autoLot != null && autoLot["st"] == "on";
-    final ran = (autoLot?["ran"] as num?)?.toDouble();
-    final total = (autoLot?["total"] as num?)?.toDouble() ?? lotConfig.mins?.toDouble();
+    
+    // Timer mode: Kiểm tra "aerating" từ device message để xác định đang chạy
+    // Parse aerating: có thể là bool, string "true"/"false", hoặc số 1/0
+    bool? aerating;
+    final aeratingRaw = autoLot?["aerating"];
+    if (aeratingRaw is bool) {
+      aerating = aeratingRaw;
+    } else if (aeratingRaw is String) {
+      aerating = aeratingRaw.toLowerCase() == "true" || aeratingRaw == "1";
+    } else if (aeratingRaw is num) {
+      aerating = aeratingRaw != 0;
+    }
+    
+    final isRunning = autoEnable && (aerating == true);
+    
+    // Đọc time từ device message (phút)
+    final ran = (autoLot?["time"] as num?)?.toDouble();
+    final total = lotConfig.mins?.toDouble();
+    
+    // Kiểm tra đã hoàn thành: timer >= mins và không đang chạy
+    final isDone = !isRunning && 
+        ran != null && 
+        total != null && 
+        ran >= total;
 
     String timeText;
     if (ran != null && total != null) {
@@ -677,7 +878,9 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
         style: AppTheme.textStyle(
           fontSize: 15,
           fontWeight: FontWeight.w500,
-          color: isRunning ? AppTheme.primaryColor : null,
+          color: isRunning
+              ? AppTheme.primaryColor
+              : (isDone ? Colors.grey : null),
         ),
       ),
       trailing: Text(
@@ -685,7 +888,9 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
         style: AppTheme.textStyle(
           fontSize: 14,
           fontWeight: FontWeight.w500,
-          color: AppTheme.primaryColor,
+          color: isDone
+              ? Colors.grey
+              : (isRunning ? AppTheme.primaryColor : AppTheme.$3A3A3A),
         ),
       ),
     );
@@ -694,19 +899,32 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
   Widget _doLotMonitorWidget(TBLotConfig lotConfig) {
     final lot = _lotsMap[lotConfig.id];
     final lotName = lot?.name ?? "Lot ${lotConfig.id}";
-    final autoLot = _autoLots[lotConfig.id];
+    final autoLot = _autoLots[lotConfig.id]; // Data từ device: {auActProId, doMin, doAvg, doMax, aerating}
     final autoEnable = _getBooleanComponentValue("autoEnable");
-    final isRunning = autoEnable && autoLot != null && autoLot["st"] == "on";
+    
+    // DO mode: Kiểm tra "aerating" từ device để xác định máy quạn đạt đang chạy
+    // Parse aerating: có thể là bool, string "true"/"false", hoặc số 1/0
+    bool? aerating;
+    final aeratingRaw = autoLot?["aerating"];
+    if (aeratingRaw is bool) {
+      aerating = aeratingRaw;
+    } else if (aeratingRaw is String) {
+      aerating = aeratingRaw.toLowerCase() == "true" || aeratingRaw == "1";
+    } else if (aeratingRaw is num) {
+      aerating = aeratingRaw != 0;
+    }
+    
+    final isRunning = autoEnable && (aerating == true);
 
-    // Use min/avg/max from server autoLots data
-    final serverMin = (autoLot?["min"] as num?)?.toDouble();
-    final serverAvg = (autoLot?["avg"] as num?)?.toDouble();
-    final serverMax = (autoLot?["max"] as num?)?.toDouble();
+    // Đọc doMin, doAvg, doMax từ device data
+    final doMin = (autoLot?["doMin"] as num?)?.toDouble();
+    final doAvg = (autoLot?["doAvg"] as num?)?.toDouble();
+    final doMax = (autoLot?["doMax"] as num?)?.toDouble();
 
     String statsText;
-    if (serverMin != null && serverAvg != null && serverMax != null) {
+    if (doMin != null && doAvg != null && doMax != null) {
       statsText =
-          "${serverMin.toStringAsFixed(1)} | ${serverAvg.toStringAsFixed(1)} | ${serverMax.toStringAsFixed(1)}";
+          "${doMin.toStringAsFixed(1)} | ${doAvg.toStringAsFixed(1)} | ${doMax.toStringAsFixed(1)}";
     } else {
       statsText = "-- | -- | --";
     }
@@ -745,7 +963,7 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
         style: AppTheme.textStyle(
           fontSize: 13,
           fontWeight: FontWeight.w500,
-          color: AppTheme.primaryColor,
+          color: isRunning ? AppTheme.primaryColor : AppTheme.$3A3A3A,
         ),
       ),
     );
@@ -816,5 +1034,28 @@ class _TBAutoControlPageState extends State<TBAutoControlPage>
     return DateTime.fromMillisecondsSinceEpoch(timestamp)
         .ex
         .asString("yyyy-MM-dd HH:mm:ss");
+  }
+
+  /// Quy đổi intervalMinutes sang định dạng dễ đọc
+  String _formatRepeatInterval(int minutes) {
+    if (minutes == 0) {
+      return 'Một lần';
+    } else if (minutes == 60) {
+      return 'Mỗi giờ';
+    } else if (minutes == 1440) {
+      return 'Hàng ngày';
+    } else if (minutes == 10080) {
+      return 'Hàng tuần';
+    } else if (minutes % 1440 == 0) {
+      // Chia hết cho ngày
+      final days = minutes ~/ 1440;
+      return 'Mỗi $days ngày';
+    } else if (minutes % 60 == 0) {
+      // Chia hết cho giờ
+      final hours = minutes ~/ 60;
+      return 'Mỗi $hours giờ';
+    } else {
+      return 'Mỗi $minutes phút';
+    }
   }
 }

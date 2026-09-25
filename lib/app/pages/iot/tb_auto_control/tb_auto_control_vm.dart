@@ -80,7 +80,7 @@ class TBAutoControlVM
 
     input.autoEnable
         .switchMap((enable) => tbService
-            .setValue(system.deviceId, "autoEnable", enable)
+            .setValue(system.deviceId, "autoEnable", enable, 30000)
             .trackActivity("auto", activityTracker))
         .handleErrorBy(errorTracker)
         .bindTo(output.updatedValues)
@@ -88,7 +88,7 @@ class TBAutoControlVM
 
     input.autoPauseEnable
         .switchMap((enable) => tbService
-            .setValue(system.deviceId, "autoPauseEnable", enable)
+            .setValue(system.deviceId, "autoPauseEnable", enable, 3000)
             .trackActivity("pause", activityTracker))
         .handleErrorBy(errorTracker)
         .bindTo(output.updatedValues)

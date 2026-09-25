@@ -199,6 +199,7 @@ class _TBTimeseriesChartPageState extends State<TBTimeseriesChartPage>
   _exportToCSV() async {
     var system = widget.system.name;
     var device = widget.component.nameDevice;
+    var variable = widget.component.variable;
     var unit = widget.component.unit ?? "";
 
     var data = <List<String>>[
@@ -209,7 +210,7 @@ class _TBTimeseriesChartPageState extends State<TBTimeseriesChartPage>
       ['Thời gian', 'Giá trị ($unit)'],
       for (var p in _spots)
         [
-          DateTime.fromMillisecondsSinceEpoch(p.x.toInt()).toIso8601String(),
+          DateTime.fromMillisecondsSinceEpoch(p.x.toInt()).ex.asString(DatePattern.ddMMyyyyHHmmss),
           p.y.toString(),
         ],
     ];
@@ -219,8 +220,8 @@ class _TBTimeseriesChartPageState extends State<TBTimeseriesChartPage>
 
     var xFile = XFile.fromData(
       csvData,
-      mimeType: 'csv',
-      name: '${system}_${device}_${DateTime.now().toIso8601String()}',
+      mimeType: 'text/csv',
+      name: '${system}_${variable}_${DateTime.now().ex.asString(DatePattern.ddMMyyyyHHmmss)}.csv',
     );
 
     await Share.shareXFiles(

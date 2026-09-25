@@ -39,6 +39,10 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
   bool get _isIrrigation => widget.controlSystem.appType == "irrigation";
   var _startNow = false;
   String? _scheduleType; // irrigation only
+  
+  // Repeat interval state
+  String _repeatType = 'once'; // 'once', 'hourly', 'daily', 'weekly', 'custom'
+  final _customMinutesController = TextEditingController();
 
   @override
   void initState() {
@@ -54,6 +58,7 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
     _rxBag.dispose();
     _prMaintainTextController.dispose();
     _safeAtpressTextController.dispose();
+    _customMinutesController.dispose();
   }
 
   void _setupInitialData() {
@@ -67,6 +72,21 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
 
     _safeAtpressTextController.text =
         (_currentATSys.safeAtpress ?? 0).toString();
+    
+    // Initialize repeat interval
+    final interval = _currentATSys.intervalMinutes ?? 0;
+    if (interval == 0) {
+      _repeatType = 'once';
+    } else if (interval == 60) {
+      _repeatType = 'hourly';
+    } else if (interval == 1440) {
+      _repeatType = 'daily';
+    } else if (interval == 10080) {
+      _repeatType = 'weekly';
+    } else {
+      _repeatType = 'custom';
+      _customMinutesController.text = interval.toString();
+    }
   }
 
   void _bindViewModel() {
@@ -103,9 +123,11 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
         isLoading: _vm.activityTracker.isRunningAny(),
         child: ListView(
           children: [
-            if (_isAquaculture)
-              _startTimeWidget()
-            else if (_isIrrigation) ...[
+            if (_isAquaculture) ...[
+              _startTimeWidget(),
+              const SizedBox(height: 8),
+              _repeatIntervalWidget(),
+            ] else if (_isIrrigation) ...[
               _prMaintainWidget(),
               const SizedBox(height: 8),
               _startTimeWidget(),
@@ -213,11 +235,7 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
                     ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
+                const SizedBox(width: 12),
                 Checkbox(
                   value: _startNow,
                   onChanged: (value) {
@@ -318,6 +336,86 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
         0,
       );
     });
+  }
+
+  Widget _repeatIntervalWidget() {
+    const options = [
+      ('once', 'Một lần'),
+      ('hourly', 'Hourly'),
+      ('daily', 'Daily'),
+      ('weekly', 'Weekly'),
+      ('custom', 'Custom'),
+    ];
+
+    return Material(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              "Chế độ lặp lại:",
+              style: AppTheme.textStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _repeatType,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppTheme.$F3F3F3,
+                border: OutlineInputBorder(
+                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+              items: options.map((option) {
+                return DropdownMenuItem(
+                  value: option.$1,
+                  child: Text(
+                    option.$2,
+                    style: AppTheme.textStyle(fontSize: 16),
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  _repeatType = value ?? 'once';
+                });
+              },
+            ),
+            if (_repeatType == 'custom') ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _customMinutesController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: "Số phút",
+                  hintText: "Nhập số phút",
+                  filled: true,
+                  fillColor: AppTheme.$F3F3F3,
+                  border: OutlineInputBorder(
+                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
   Widget _autoModeSelectionWidget() {
     return Material(
@@ -546,6 +644,25 @@ class _TBATSystemConfigPageState extends State<TBATSystemConfigPage> {
       _currentATSys.startNow = _startNow;
       if (!_startNow) {
         // startTime already set by _pickStartTime
+      }
+      // Set intervalMinutes based on repeat type
+      switch (_repeatType) {
+        case 'once':
+          _currentATSys.intervalMinutes = 0;
+          break;
+        case 'hourly':
+          _currentATSys.intervalMinutes = 60;
+          break;
+        case 'daily':
+          _currentATSys.intervalMinutes = 1440; // 24 * 60
+          break;
+        case 'weekly':
+          _currentATSys.intervalMinutes = 10080; // 7 * 24 * 60
+          break;
+        case 'custom':
+          _currentATSys.intervalMinutes = 
+              int.tryParse(_customMinutesController.text) ?? 0;
+          break;
       }
     } else if (_isIrrigation) {
       _currentATSys.prMaintainValue =

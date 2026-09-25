@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:collection/collection.dart';
+import 'package:zen8app/api/api.dart';
 import 'package:zen8app/app/pages/iot/tb_auto_mode/tb_assign_boolean_step_widget.dart';
 import 'package:zen8app/app/pages/iot/tb_auto_mode/tb_assign_float_step_widget.dart';
 import 'package:zen8app/app/pages/iot/tb_auto_mode/tb_auto_mode_vm.dart';
@@ -139,9 +140,21 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
       index: _editingMode.stationRlc.contains(index),
   };
 
+  // Station fertilizer mode: specific pump/valve selection
+  int? _stationIriPumpSelected;
+  int? _stationFerPumpSelected;
+  late Map<int, bool> _stationFerValveSelected;
+  
+  // Station fertilizer channels (digital inputs) for fertilizer mode
+  late List<int> _stationFertilizerChannelIndices;
+  late Map<int, bool> _stationFertilizerChannelSelected;
+
   // Irrigation timer: run mode
-  late String _irrigationRunMode =
-      _editingMode.runMode ?? TBRunMode.alternating;
+  // For aquaculture timer mode, always use simultaneous (đồng thời)
+  // For irrigation timer mode, allow alternating or simultaneous
+  late String _irrigationRunMode = _editingMode.isAquacultureMode
+      ? TBRunMode.simultaneous
+      : (_editingMode.runMode ?? TBRunMode.alternating);
 
   /// Find rlc indices (rlc0, rlc1...) from a lot's components
   List<int> _getRlcIndices(TBGroup lot) {
@@ -192,6 +205,40 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
       ..sort();
   }
 
+  /// Get fertilizer channel (digital input lưu lượng phân) indices from station UIconfig
+  /// Returns DI indices that contain "phân" or "lượng" in device name
+  List<int> _getStationFertilizerChannelIndices() {
+    if (_station == null) return [];
+    return _station!.components
+        .where((c) =>
+            c.variable.toLowerCase().startsWith('di') &&
+            (c.nameDevice.toLowerCase().contains('phân') ||
+             c.nameDevice.toLowerCase().contains('lượng')))
+        .map((c) => int.tryParse(c.variable.substring(2)))
+        .where((i) => i != null)
+        .cast<int>()
+        .toList()
+      ..sort();
+  }
+
+  /// Get irrigation pump (bơm tưới) relay indices from station
+  /// Returns all station relay indices for user selection
+  List<int> _getStationIriPumps() {
+    return _stationRlcIndices;
+  }
+
+  /// Get fertilizer pump (bơm phân) relay indices from station
+  /// Returns all station relay indices for user selection
+  List<int> _getStationFerPumps() {
+    return _stationRlcIndices;
+  }
+
+  /// Get fertilizer valve (van phân) relay indices from station
+  /// Returns all station relay indices for user selection
+  List<int> _getStationFerValves() {
+    return _stationRlcIndices;
+  }
+
   /// Get all unique RLC indices from all lots
   List<int> _getAllRlcIndices() {
     final allRlc = <int>{};
@@ -215,10 +262,56 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     return indices.isNotEmpty ? indices.first : null;
   }
 
+  // Irrigation fertilizer mode state: Map<lotId, Map<valveIndex, controller>>
+  // This will be populated dynamically based on selected fertilizer valves
+  final Map<int, Map<int, TextEditingController>> _fertilizerControllers = {};
+
+  /// Get or create fertilizer controller for a lot and valve index
+  TextEditingController _getFertilizerController(int lotId, int valveIdx) {
+    if (!_fertilizerControllers.containsKey(lotId)) {
+      _fertilizerControllers[lotId] = {};
+    }
+    if (!_fertilizerControllers[lotId]!.containsKey(valveIdx)) {
+      final existingValue = _editingMode.lotList
+              .where((l) => l.id == lotId)
+              .firstOrNull
+              ?.fertilizerChannels[valveIdx]
+              ?.toString() ??
+          '';
+      _fertilizerControllers[lotId]![valveIdx] = TextEditingController(text: existingValue);
+    }
+    return _fertilizerControllers[lotId]![valveIdx]!;
+  }
+
   @override
   void initState() {
     super.initState();
     _bindViewModel();
+    
+    // Initialize fertilizer channel selection for fertilizer mode
+    if (_editingMode.modeType == TBModeType.fertilizer) {
+      _stationFertilizerChannelIndices = _getStationFertilizerChannelIndices();
+      _stationFertilizerChannelSelected = {
+        for (var index in _stationFertilizerChannelIndices)
+          index: _editingMode.lotList
+                  .firstOrNull
+                  ?.fertilizerChannels
+                  .containsKey(index) ??
+              false,
+      };
+      // Initialize pump/valve selection
+      _stationIriPumpSelected = _editingMode.stationIriPump;
+      _stationFerPumpSelected = _editingMode.stationFerPump;
+      final ferValveIndices = _getStationFerValves();
+      _stationFerValveSelected = {
+        for (var index in ferValveIndices)
+          index: _editingMode.stationFerValve.contains(index),
+      };
+    } else {
+      _stationFertilizerChannelIndices = [];
+      _stationFertilizerChannelSelected = {};
+      _stationFerValveSelected = {};
+    }
   }
 
   @override
@@ -241,6 +334,11 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     }
     for (var c in _smEndControllers.values) {
       c.dispose();
+    }
+    for (var lotControllers in _fertilizerControllers.values) {
+      for (var c in lotControllers.values) {
+        c.dispose();
+      }
     }
   }
 
@@ -302,20 +400,52 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
           children: [
             _idWidget(),
             const SizedBox(height: 16),
+            // Note: Run mode selection is hidden for aquaculture
+            // Aquaculture always uses simultaneous mode (đồng thời)
             if (_station != null) ...[
               _stationControlWidget(),
               const SizedBox(height: 16),
             ],
             Text(
-              "Danh sách Lot",
+              "Danh sách Ao",
               style: AppTheme.textStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
+            // Thông báo nếu không có ao nào có sensor DO
+            if (_editingMode.modeType == TBModeType.dissolvedOxygen &&
+                _lots.every((lot) => _getDoIndices(lot).isEmpty))
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber, color: Colors.orange.shade700),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        "Không có ao nào có cảm biến DO. Vui lòng kiểm tra cấu hình farmConfig.",
+                        style: AppTheme.textStyle(
+                          fontSize: 14,
+                          color: Colors.orange.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             for (var lot in _lots) ...[
-              if (_editingMode.modeType == TBModeType.timer)
+              // Chế độ DO: chỉ hiển thị ao có sensor DO
+              if (_editingMode.modeType == TBModeType.dissolvedOxygen && 
+                  _getDoIndices(lot).isEmpty)
+                const SizedBox.shrink()
+              else if (_editingMode.modeType == TBModeType.timer)
                 _timerLotWidget(lot)
               else
                 _doLotWidget(lot),
@@ -565,6 +695,224 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     );
   }
 
+  Widget _stationFertilizerValveWidget() {
+    if (_station == null) return const SizedBox.shrink();
+    
+    final allRelays = _getStationIriPumps(); // Now returns all station relays
+    
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.$E1E1E1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "Trạm: ${_station!.name}",
+            style: AppTheme.textStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Enable station control checkbox
+          Row(
+            children: [
+              Checkbox(
+                value: _stationEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _stationEnabled = value ?? false;
+                  });
+                },
+              ),
+              Expanded(
+                child: Text(
+                  "Điều khiển thiết bị tại trạm",
+                  style: AppTheme.textStyle(fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          
+          if (_stationEnabled) ...[
+            const SizedBox(height: 16),
+            if (allRelays.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Text(
+                  "⚠ Chưa cấu hình relay tại trạm",
+                  style: AppTheme.textStyle(fontSize: 13, color: Colors.orange),
+                ),
+              )
+            else ...[
+              // Section 1: Irrigation pump dropdown
+              Text(
+                "Bơm tưới:",
+                style: AppTheme.textStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 8),
+              DropdownButton<int?>(
+                value: _stationIriPumpSelected,
+                isExpanded: true,
+                hint: const Text("-- Chọn bơm tưới --"),
+                items: [
+                  const DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text("-- Không chọn --"),
+                  ),
+                  for (var index in allRelays)
+                    DropdownMenuItem<int?>(
+                      value: index,
+                      child: Text(
+                        _station!.components
+                            .where((c) => c.variable == 'rlc$index')
+                            .firstOrNull
+                            ?.nameDevice ?? 'rlc$index',
+                      ),
+                    ),
+                ],
+                onChanged: (value) {
+                  setState(() {
+                    _stationIriPumpSelected = value;
+                  });
+                },
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Section 2: Fertilizer pump dropdown
+              Text(
+                "Bơm phân:",
+                style: AppTheme.textStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 8),
+              DropdownButton<int?>(
+                value: _stationFerPumpSelected,
+                isExpanded: true,
+                hint: const Text("-- Chọn bơm phân --"),
+                items: [
+                  const DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text("-- Không chọn --"),
+                  ),
+                  for (var index in allRelays)
+                    DropdownMenuItem<int?>(
+                      value: index,
+                      child: Text(
+                        _station!.components
+                            .where((c) => c.variable == 'rlc$index')
+                            .firstOrNull
+                            ?.nameDevice ?? 'rlc$index',
+                      ),
+                    ),
+                ],
+                onChanged: (value) {
+                  setState(() {
+                    _stationFerPumpSelected = value;
+                  });
+                },
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Section 3: Fertilizer valves chips
+              Text(
+                "Van phân:",
+                style: AppTheme.textStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (var index in allRelays)
+                    FilterChip(
+                      label: Text(
+                        _station!.components
+                            .where((c) => c.variable == 'rlc$index')
+                            .firstOrNull
+                            ?.nameDevice ?? 'rlc$index',
+                      ),
+                      selected: _stationFerValveSelected[index] ?? false,
+                      onSelected: (selected) {
+                        setState(() {
+                          _stationFerValveSelected[index] = selected;
+                        });
+                      },
+                      selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+                      labelStyle: AppTheme.textStyle(
+                        fontSize: 13,
+                        color: (_stationFerValveSelected[index] ?? false)
+                            ? AppTheme.primaryColor
+                            : AppTheme.$A3A3A3,
+                        fontWeight: (_stationFerValveSelected[index] ?? false)
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ],
+          
+          const SizedBox(height: 16),
+          const Divider(),
+          const SizedBox(height: 8),
+          
+          // Section 4: Fertilizer flow meter channels
+          if (_stationFertilizerChannelIndices.isEmpty) ...[
+            Text(
+              "⚠ Chưa cấu hình kênh lưu lượng phân tại trạm",
+              style: AppTheme.textStyle(fontSize: 13, color: Colors.orange),
+            ),
+          ] else ...[
+            Text(
+              "Chọn kênh lưu lượng phân:",
+              style: AppTheme.textStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (var index in _stationFertilizerChannelIndices)
+                  FilterChip(
+                    label: Text(
+                      _station!.components
+                          .where((c) => c.variable == 'di$index')
+                          .firstOrNull
+                          ?.nameDevice ?? 'Kênh $index',
+                    ),
+                    selected: _stationFertilizerChannelSelected[index] ?? false,
+                    onSelected: (selected) {
+                      setState(() {
+                        _stationFertilizerChannelSelected[index] = selected;
+                      });
+                    },
+                    selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+                    labelStyle: AppTheme.textStyle(
+                      fontSize: 13,
+                      color: (_stationFertilizerChannelSelected[index] ?? false)
+                          ? AppTheme.primaryColor
+                          : AppTheme.$A3A3A3,
+                      fontWeight: (_stationFertilizerChannelSelected[index] ?? false)
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _calcMethodChip(int lotId, String value, String label) {
     final isSelected = _calcMethods[lotId] == value;
     return ChoiceChip(
@@ -598,6 +946,7 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
           id: lot.id,
           mins: mins,
           rlc: rlcIndices,
+          iriAutoIndex: _getIriAutoIndex(lot),
         ));
       } else {
         final doEndOn = _doEndEnabled[lot.id] ?? false;
@@ -614,6 +963,12 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
         ));
       }
     }
+    
+    // Set runMode for timer mode (similar to irrigation)
+    _editingMode.runMode = (_editingMode.modeType == TBModeType.timer)
+        ? _irrigationRunMode
+        : null;
+    
     _editingMode.stationEnabled = _stationEnabled;
     _editingMode.stationRlc.clear();
     for (var index in _stationRlcIndices) {
@@ -625,7 +980,27 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     if (_editingMode.validate()) {
       _vm.input.update.add((_editingMode, widget.system.deviceId));
     } else {
-      _showError("Vui lòng nhập đầy đủ và chính xác thông tin");
+      // Debug: Kiểm tra từng ao để tìm lỗi
+      final errors = <String>[];
+      for (var lotConfig in _editingMode.lotList) {
+        final lot = _lots.firstWhere((l) => l.id == lotConfig.id);
+        if (_editingMode.modeType == TBModeType.dissolvedOxygen) {
+          if (lotConfig.doStart == null) {
+            errors.add("${lot.name}: Chưa nhập ngưỡng DO bắt đầu");
+          }
+          if (lotConfig.calcMethod == null) {
+            errors.add("${lot.name}: Chưa chọn phương pháp tính (Min/TB/Max)");
+          }
+          // Không cần check doIndices vì UI đã filter
+          if (lotConfig.rlc.isEmpty) {
+            errors.add("${lot.name}: Không có relay");
+          }
+        }
+      }
+      final errorMsg = errors.isEmpty 
+          ? "Vui lòng nhập đầy đủ và chính xác thông tin"
+          : errors.join("\n");
+      _showError(errorMsg);
     }
   }
 
@@ -697,7 +1072,10 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
               const SizedBox(height: 16),
             ],
             if (_station != null) ...[
-              _stationControlWidget(),
+              if (_editingMode.modeType == TBModeType.fertilizer)
+                _stationFertilizerValveWidget()
+              else
+                _stationControlWidget(),
               const SizedBox(height: 16),
             ],
             Text(
@@ -713,12 +1091,137 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
                 _timerLotWidget(lot)
               else if (_editingMode.modeType == TBModeType.soilMoisture)
                 _smLotWidget(lot)
+              else if (_editingMode.modeType == TBModeType.fertilizer)
+                _fertilizerLotWidget(lot)
               else
-                _timerLotWidget(lot), // fertilizer: dùng timer tạm, chi tiết sau
+                _timerLotWidget(lot),
               const SizedBox(height: 8),
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _aquacultureRunModeWidget() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.$E1E1E1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "Cách chạy các ao:",
+            style: AppTheme.textStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(
+                      () => _irrigationRunMode = TBRunMode.alternating),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _irrigationRunMode == TBRunMode.alternating
+                          ? AppTheme.primaryColor.withOpacity(0.12)
+                          : AppTheme.$F3F3F3,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _irrigationRunMode == TBRunMode.alternating
+                            ? AppTheme.primaryColor
+                            : AppTheme.$E1E1E1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.linear_scale,
+                          size: 18,
+                          color: _irrigationRunMode == TBRunMode.alternating
+                              ? AppTheme.primaryColor
+                              : AppTheme.$A3A3A3,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Luân phiên",
+                          style: AppTheme.textStyle(
+                            fontSize: 14,
+                            fontWeight:
+                                _irrigationRunMode == TBRunMode.alternating
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                            color: _irrigationRunMode == TBRunMode.alternating
+                                ? AppTheme.primaryColor
+                                : AppTheme.$666666,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(
+                      () => _irrigationRunMode = TBRunMode.simultaneous),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _irrigationRunMode == TBRunMode.simultaneous
+                          ? AppTheme.primaryColor.withOpacity(0.12)
+                          : AppTheme.$F3F3F3,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _irrigationRunMode == TBRunMode.simultaneous
+                            ? AppTheme.primaryColor
+                            : AppTheme.$E1E1E1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.grid_view,
+                          size: 18,
+                          color: _irrigationRunMode == TBRunMode.simultaneous
+                              ? AppTheme.primaryColor
+                              : AppTheme.$A3A3A3,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Đồng thời",
+                          style: AppTheme.textStyle(
+                            fontSize: 14,
+                            fontWeight:
+                                _irrigationRunMode == TBRunMode.simultaneous
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                            color: _irrigationRunMode == TBRunMode.simultaneous
+                                ? AppTheme.primaryColor
+                                : AppTheme.$666666,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -952,6 +1455,100 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
     );
   }
 
+  Widget _fertilizerLotWidget(TBGroup lot) {
+    // Get selected fertilizer channels from station
+    final selectedChannels = _stationFertilizerChannelIndices
+        .where((idx) => _stationFertilizerChannelSelected[idx] == true)
+        .toList();
+        
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.$E1E1E1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Checkbox(
+                value: _lotSelected[lot.id] ?? false,
+                onChanged: (value) {
+                  setState(() {
+                    _lotSelected[lot.id] = value ?? false;
+                  });
+                },
+              ),
+              Expanded(
+                child: Text(
+                  lot.name,
+                  style: AppTheme.textStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_lotSelected[lot.id] == true) ...[
+            const SizedBox(height: 8),
+            if (selectedChannels.isEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Text(
+                  "⚠ Vui lòng chọn kênh lưu lượng phân từ trạm",
+                  style: AppTheme.textStyle(fontSize: 13, color: Colors.orange),
+                ),
+              ),
+            ] else ...[
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Text(
+                  "Nhập số lít cho từng kênh phân:",
+                  style: AppTheme.textStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (var channelIdx in selectedChannels) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _station!.components
+                                  .where((c) => c.variable == 'di$channelIdx')
+                                  .firstOrNull
+                                  ?.nameDevice ??
+                              'Kênh $channelIdx',
+                          style: AppTheme.textStyle(fontSize: 13),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 100,
+                        child: _inputField(
+                          controller: _getFertilizerController(lot.id, channelIdx),
+                          hintText: "0",
+                          suffixText: "lít",
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
   void _submitIrrigation() {
     _editingMode.lotList.clear();
     for (var lot in _lots) {
@@ -978,8 +1575,23 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
           rlc: rlcIndices,
           smIndices: _getSmIndices(lot),
         ));
+      } else if (_editingMode.modeType == TBModeType.fertilizer) {
+        // Parse fertilizer channels
+        final fertChannels = <int, double>{};
+        final lotControllers = _fertilizerControllers[lot.id] ?? {};
+        for (var entry in lotControllers.entries) {
+          final liters = double.tryParse(entry.value.text);
+          if (liters != null && liters > 0) {
+            fertChannels[entry.key] = liters;
+          }
+        }
+        _editingMode.lotList.add(TBLotConfig(
+          id: lot.id,
+          rlc: rlcIndices,
+          fertilizerChannels: fertChannels,
+        ));
       } else {
-        // fertilizer: chi tiết tính sau, tạm lưu timer
+        // other mode: default timer
         final mins = double.tryParse(_minsControllers[lot.id]!.text);
         _editingMode.lotList.add(TBLotConfig(
           id: lot.id,
@@ -992,10 +1604,24 @@ class _TBAutoModePageState extends State<TBAutoModePage> {
         ? _irrigationRunMode
         : null;
     _editingMode.stationEnabled = _stationEnabled;
-    _editingMode.stationRlc.clear();
-    for (var index in _stationRlcIndices) {
-      if (_stationRlcSelected[index] ?? false) {
-        _editingMode.stationRlc.add(index);
+    
+    // Station control: use specific fields for fertilizer mode
+    if (_editingMode.modeType == TBModeType.fertilizer) {
+      _editingMode.stationIriPump = _stationIriPumpSelected;
+      _editingMode.stationFerPump = _stationFerPumpSelected;
+      _editingMode.stationFerValve.clear();
+      for (var entry in _stationFerValveSelected.entries) {
+        if (entry.value) {
+          _editingMode.stationFerValve.add(entry.key);
+        }
+      }
+    } else {
+      // Other modes: use legacy rlc list
+      _editingMode.stationRlc.clear();
+      for (var index in _stationRlcIndices) {
+        if (_stationRlcSelected[index] ?? false) {
+          _editingMode.stationRlc.add(index);
+        }
       }
     }
 

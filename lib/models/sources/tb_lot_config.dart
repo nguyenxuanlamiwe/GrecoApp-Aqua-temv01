@@ -13,6 +13,8 @@ class TBLotConfig {
   bool smEndEnabled;
   List<int> smIndices; // sm sensor indices from farmConfig components
   int? iriAutoIndex; // tIriAuto index from farmConfig components (irrigation timer)
+  // irrigation fertilizer mode
+  Map<int, double> fertilizerChannels; // key: di index, value: liters
 
   TBLotConfig({
     required this.id,
@@ -28,6 +30,7 @@ class TBLotConfig {
     this.smEndEnabled = false,
     this.smIndices = const [],
     this.iriAutoIndex,
+    this.fertilizerChannels = const {},
   });
 
   TBLotConfig copy() => TBLotConfig(
@@ -44,6 +47,7 @@ class TBLotConfig {
         smEndEnabled: smEndEnabled,
         smIndices: [...smIndices],
         iriAutoIndex: iriAutoIndex,
+        fertilizerChannels: {...fertilizerChannels},
       );
 
   factory TBLotConfig.fromJson(Map<String, dynamic> json) => TBLotConfig(
@@ -60,6 +64,9 @@ class TBLotConfig {
         smEndEnabled: (json['smee'] as bool?) ?? false,
         smIndices: (json['sm'] as List?)?.map((e) => (e as num).toInt()).toList() ?? [],
         iriAutoIndex: (json['ia'] as num?)?.toInt(),
+        fertilizerChannels: (json['fert'] as Map<String, dynamic>?)?.map(
+          (k, v) => MapEntry(int.parse(k), (v as num).toDouble()),
+        ) ?? {},
       );
 
   Map<String, dynamic> toJson() {
@@ -78,6 +85,10 @@ class TBLotConfig {
     if (smEndEnabled) result['smee'] = smEndEnabled;
     if (smIndices.isNotEmpty) result['sm'] = smIndices;
     if (iriAutoIndex != null) result['ia'] = iriAutoIndex;
+    // Fertilizer fields
+    if (fertilizerChannels.isNotEmpty) {
+      result['fert'] = fertilizerChannels.map((k, v) => MapEntry(k.toString(), v));
+    }
     return result;
   }
 
@@ -88,4 +99,9 @@ class TBLotConfig {
 
   bool validateSM() =>
       smStart != null && calcMethod != null && smIndices.isNotEmpty;
+
+  bool validateFertilizer() =>
+      fertilizerChannels.isNotEmpty &&
+      fertilizerChannels.values.every((liters) => liters > 0) &&
+      rlc.isNotEmpty;
 }

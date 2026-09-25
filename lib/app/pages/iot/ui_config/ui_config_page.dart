@@ -48,9 +48,7 @@ class _EditableComponent {
           ))
       .toList();
 
-  _EditableComponent({this.componentType = 'sensor', this.icon = 8, this.isExpanded = false}) {
-    nameCtrl.text = 'Thiết bị mới';
-  }
+  _EditableComponent({this.componentType = 'sensor', this.icon = 8, this.isExpanded = false});
 
   factory _EditableComponent.fromComponent(TBComponent c) {
     const validTypes = {'sensor', 'actuator'};
@@ -150,6 +148,8 @@ class _UIConfigPageState extends State<UIConfigPage> {
   // Step 2
   final List<_EditableGroup> _groups = [];
   int _nextGroupId = 1;
+  List<TBComponent> _availableDevices = [];
+  bool _loadingDevices = false;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   @override
@@ -207,8 +207,127 @@ class _UIConfigPageState extends State<UIConfigPage> {
           if (g.id >= _nextGroupId) _nextGroupId = g.id + 1;
         }
         _step = 1; // bỏ qua chọn loại nếu đã có config
+        
+        // Load device config from platform
+        if (sys.deviceId.isNotEmpty) {
+          _loadDeviceConfig(sys.deviceId);
+        }
       });
     }).catchError((_) {});
+  }
+
+  Future<void> _loadDeviceConfig(String deviceId) async {
+    if (deviceId.isEmpty) return;
+    
+    setState(() => _loadingDevices = true);
+    try {
+      final tbService = DI.resolve<TBService>();
+      final devices = await tbService.getDeviceConfig(deviceId).first;
+      if (mounted) {
+        setState(() {
+          _availableDevices = devices;
+          _loadingDevices = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loadingDevices = false);
+      }
+    }
+  }
+
+  List<TBComponent> _getFilteredDevices(String componentType) {
+    if (_availableDevices.isEmpty) return [];
+    
+    if (componentType == 'actuator') {
+      // Thiết bị: chỉ lấy relay devices (boolean)
+      return _availableDevices
+          .where((d) => d.dataType == 'boolean' || 
+                       (d.type?.toLowerCase().contains('relay') ?? false))
+          .toList();
+    } else {
+      // Cảm biến: lấy timer, analog, digital, modbus
+      return _availableDevices
+          .where((d) {
+            final type = d.type?.toLowerCase() ?? '';
+            final dataType = d.dataType?.toLowerCase() ?? '';
+            return type.contains('timer') ||
+                   type.contains('analog') ||
+                   type.contains('digital') ||
+                   type.contains('modbus') ||
+                   dataType == 'float' ||
+                   dataType == 'int';
+          })
+          .toList();
+    }
+  }
+
+  Future<void> _selectDeviceFromPlatform(int groupIdx, int compIdx) async {
+    final comp = _groups[groupIdx].components[compIdx];
+    
+    // Load devices if not loaded yet
+    if (_availableDevices.isEmpty && _deviceIdCtrl.text.isNotEmpty) {
+      await _loadDeviceConfig(_deviceIdCtrl.text);
+    }
+    
+    final filteredDevices = _getFilteredDevices(comp.componentType);
+    
+    if (filteredDevices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Không tìm thấy thiết bị phù hợp từ platform. Vui lòng kiểm tra Device ID.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    // Show device picker dialog
+    final selected = await showDialog<TBComponent>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Chọn ${comp.componentType == "actuator" ? "Thiết bị" : "Cảm biến"}',
+          style: AppTheme.textStyle(fontWeight: FontWeight.w600),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: filteredDevices.length,
+            itemBuilder: (context, index) {
+              final device = filteredDevices[index];
+              return ListTile(
+                title: Text(device.nameDevice),
+                subtitle: Text(
+                  'Variable: ${device.variable}${device.unit != null ? " • ${device.unit}" : ""}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                leading: const Icon(Icons.devices),
+                onTap: () => Navigator.of(context).pop(device),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Hủy'),
+          ),
+        ],
+      ),
+    );
+    
+    if (selected != null) {
+      setState(() {
+        comp.variableCtrl.text = selected.variable;
+        comp.nameCtrl.text = selected.nameDevice;
+        // Unit is still manually entered by user, but can suggest from device
+        if (selected.unit != null && comp.unitCtrl.text.isEmpty) {
+          comp.unitCtrl.text = selected.unit!;
+        }
+      });
+    }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -794,42 +913,83 @@ class _UIConfigPageState extends State<UIConfigPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
+                  // Tên thiết bị
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _fieldLabel('Variable', fontSize: 11),
-                            const SizedBox(height: 2),
-                            TextField(
-                              controller: comp.variableCtrl,
-                              style: const TextStyle(fontSize: 12),
-                              decoration: const InputDecoration(
-                                hintText: 'vd: rlc0, sm1',
-                                contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 8),
-                              ),
-                            ),
-                          ],
+                      _fieldLabel('Tên thiết bị', fontSize: 11),
+                      const SizedBox(height: 2),
+                      TextField(
+                        controller: comp.nameCtrl,
+                        style: const TextStyle(fontSize: 12),
+                        decoration: const InputDecoration(
+                          hintText: 'vd: Quạt 1, Cảm biến nhiệt độ',
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
                         ),
+                        onChanged: (_) => setState(() {}),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _fieldLabel('Tên hiển thị', fontSize: 11),
-                            const SizedBox(height: 2),
-                            TextField(
-                              controller: comp.nameCtrl,
-                              style: const TextStyle(fontSize: 12),
-                              decoration: const InputDecoration(
-                                contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 8),
-                              ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Biến (variable)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _fieldLabel('Biến', fontSize: 11),
+                          const SizedBox(width: 4),
+                          Tooltip(
+                            message: 'Tên biến từ thiết bị (vd: temp, humi, fan1)',
+                            child: Icon(
+                              Icons.info_outline,
+                              size: 14,
+                              color: AppTheme.$A3A3A3,
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      TextField(
+                        controller: comp.variableCtrl,
+                        style: const TextStyle(fontSize: 12),
+                        decoration: const InputDecoration(
+                          hintText: 'vd: rfcO, temp, humi',
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Nút chọn từ Platform (tùy chọn)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _fieldLabel('Hoặc chọn từ Platform', fontSize: 11),
+                      const SizedBox(height: 2),
+                      OutlinedButton.icon(
+                        onPressed: _loadingDevices 
+                            ? null 
+                            : () => _selectDeviceFromPlatform(groupIdx, compIdx),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.primaryColor,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          side: const BorderSide(color: AppTheme.primaryColor),
+                        ),
+                        icon: _loadingDevices
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.cloud_download_outlined, size: 16),
+                        label: const Text(
+                          'Chọn từ cấu hình thiết bị',
+                          style: TextStyle(fontSize: 12),
                         ),
                       ),
                     ],
@@ -857,11 +1017,14 @@ class _UIConfigPageState extends State<UIConfigPage> {
                                         style: TextStyle(fontSize: 12))),
                                 DropdownMenuItem(
                                     value: 'actuator',
-                                    child: Text('Thiết bị đóng/mở',
+                                    child: Text('Thiết bị',
                                         style: TextStyle(fontSize: 12))),
                               ],
-                              onChanged: (v) =>
-                                  setState(() => comp.componentType = v!),
+                              onChanged: (v) {
+                                setState(() {
+                                  comp.componentType = v!;
+                                });
+                              },
                             ),
                           ],
                         ),
@@ -1077,7 +1240,12 @@ class _UIConfigPageState extends State<UIConfigPage> {
       for (final c in g.components) {
         if (c.variableCtrl.text.trim().isEmpty) {
           _showError(
-              'Variable của thiết bị trong nhóm "${g.nameCtrl.text}" không được để trống');
+              'Biến của thiết bị trong nhóm "${g.nameCtrl.text}" không được để trống');
+          return false;
+        }
+        if (c.nameCtrl.text.trim().isEmpty) {
+          _showError(
+              'Tên thiết bị trong nhóm "${g.nameCtrl.text}" không được để trống');
           return false;
         }
       }

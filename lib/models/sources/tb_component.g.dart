@@ -13,6 +13,7 @@ TBComponent _$TBComponentFromJson(Map<String, dynamic> json) => TBComponent(
       unit: json['unit'] as String?,
       dataType: json['dataType'] as String?,
       icon: (json['icon'] as num?)?.toInt(),
+      relayType: (json['relayType'] as num?)?.toInt(),
     );
 
 Map<String, dynamic> _$TBComponentToJson(TBComponent instance) =>
@@ -23,4 +24,5 @@ Map<String, dynamic> _$TBComponentToJson(TBComponent instance) =>
       'unit': instance.unit,
       'dataType': instance.dataType,
       'icon': instance.icon,
+      'relayType': instance.relayType,
     };

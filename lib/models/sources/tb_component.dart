@@ -12,6 +12,7 @@ class TBComponent {
   String? unit;
   String? dataType;
   int? icon;
+  int? relayType;
 
   TBComponent({
     required this.variable,
@@ -20,6 +21,7 @@ class TBComponent {
     this.unit,
     this.dataType,
     this.icon,
+    this.relayType,
   });
 
   factory TBComponent.fromJson(Map<String, dynamic> json) =>

@@ -6,6 +6,7 @@ class TBATSystem {
   DateTime? startTime; // for aquaculture / irrigation
   bool startNow; // send "now" instead of datetime
   String? scheduleType; // irrigation only: "onetime" | "daily" | "weekly" | "monthly"
+  int? intervalMinutes; // repeat interval: 0=once, 60=hourly, 1440=daily, 10080=weekly, custom
 
   TBATSystem({
     required this.isPrMaintainEnabled,
@@ -15,6 +16,7 @@ class TBATSystem {
     this.startTime,
     this.startNow = false,
     this.scheduleType,
+    this.intervalMinutes,
   });
 
   TBATSystem.empty()
@@ -26,6 +28,7 @@ class TBATSystem {
           startTime: null,
           startNow: false,
           scheduleType: null,
+          intervalMinutes: null,
         );
 
   TBATSystem copy() => TBATSystem(
@@ -36,6 +39,7 @@ class TBATSystem {
         startTime: startTime,
         startNow: startNow,
         scheduleType: scheduleType,
+        intervalMinutes: intervalMinutes,
       );
 
   factory TBATSystem.fromJson(Map<String, dynamic> json) {
@@ -69,6 +73,7 @@ class TBATSystem {
       startTime: startTime,
       startNow: startNow,
       scheduleType: json["scheduleType"] as String?,
+      intervalMinutes: json["intervalMinutes"] as int?,
     );
   }
 
@@ -96,7 +101,7 @@ class TBATSystem {
     return result;
   }
 
-  /// For aquaculture: produces {"moId": x, "startTime": "now" or [y,m,d,h,m,0]}
+  /// For aquaculture: produces {"moId": x, "startTime": "now" or [y,m,d,h,m,0], "intervalMinutes": z}
   Map<String, dynamic> toAquacultureJson() {
     final result = <String, dynamic>{"moId": moId};
     if (startNow) {
@@ -111,6 +116,9 @@ class TBATSystem {
         0,
       ];
     }
+    if (intervalMinutes != null) {
+      result["intervalMinutes"] = intervalMinutes;
+    }
     return result;
   }
 
@@ -124,6 +132,7 @@ class TBATSystem {
     };
     if (safeAtpress != null) results["safeAtpress"] = safeAtpress;
     if (scheduleType != null) results["scheduleType"] = scheduleType;
+    if (intervalMinutes != null) results["intervalMinutes"] = intervalMinutes;
     if (startNow) {
       results["startTime"] = "now";
     } else if (startTime != null) {

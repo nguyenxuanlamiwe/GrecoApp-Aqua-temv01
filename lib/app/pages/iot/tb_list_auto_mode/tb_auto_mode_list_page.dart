@@ -197,21 +197,9 @@ class _TBAutoModeListPageState extends State<TBAutoModeListPage> {
                 children: [
                   const Icon(Icons.science_outlined, color: AppTheme.primaryColor),
                   const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Châm phân tự động",
-                        style: AppTheme.textStyle(fontSize: 16),
-                      ),
-                      Text(
-                        "(Đang phát triển)",
-                        style: AppTheme.textStyle(
-                          fontSize: 12,
-                          color: AppTheme.$A3A3A3,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    "Châm phân tự động",
+                    style: AppTheme.textStyle(fontSize: 16),
                   ),
                 ],
               ),

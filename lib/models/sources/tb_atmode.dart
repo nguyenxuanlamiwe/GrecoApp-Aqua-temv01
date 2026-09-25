@@ -22,7 +22,11 @@ class TBATMode {
   List<TBATStep> steps; // irrigation modes
   List<TBLotConfig> lotList; // aquaculture modes
   bool stationEnabled; // station control enabled
-  List<int> stationRlc; // RLC actuators controlled by station
+  List<int> stationRlc; // RLC actuators controlled by station (legacy)
+  // Fertilizer mode station config
+  int? stationIriPump;  // Irrigation pump relay index
+  int? stationFerPump;  // Fertilizer pump relay index
+  List<int> stationFerValve; // Fertilizer valve relay indices
 
   TBATMode({
     required this.moId,
@@ -33,6 +37,9 @@ class TBATMode {
     this.lotList = const [],
     this.stationEnabled = false,
     this.stationRlc = const [],
+    this.stationIriPump,
+    this.stationFerPump,
+    this.stationFerValve = const [],
   });
 
   bool get isAquacultureMode =>
@@ -54,11 +61,22 @@ class TBATMode {
         lotList: [for (var e in lotList) e.copy()],
         stationEnabled: stationEnabled,
         stationRlc: [...stationRlc],
+        stationIriPump: stationIriPump,
+        stationFerPump: stationFerPump,
+        stationFerValve: [...stationFerValve],
       );
 
   factory TBATMode.fromJson(Map<String, dynamic> json) {
     final modeType = json['modeType'] as String?;
     final stationJson = json['station'] as Map<String, dynamic>?;
+    
+    // Station is enabled if station data exists
+    final hasStationData = stationJson != null && 
+        (stationJson.containsKey('rlc') || 
+         stationJson.containsKey('iri_pump') || 
+         stationJson.containsKey('fer_pump') || 
+         stationJson.containsKey('fer_valve'));
+    
     return TBATMode(
       moId: json['moId'] as int,
       name: json['name'] as String,
@@ -76,8 +94,11 @@ class TBATMode {
                 TBLotConfig.fromJson(lot)
             ]
           : [],
-      stationEnabled: (stationJson?['enable'] as bool?) ?? false,
+      stationEnabled: hasStationData,
       stationRlc: (stationJson?['rlc'] as List?)?.map((e) => (e as num).toInt()).toList() ?? [],
+      stationIriPump: (stationJson?['iri_pump'] as num?)?.toInt(),
+      stationFerPump: (stationJson?['fer_pump'] as num?)?.toInt(),
+      stationFerValve: (stationJson?['fer_valve'] as List?)?.map((e) => (e as num).toInt()).toList() ?? [],
     );
   }
 
@@ -90,11 +111,23 @@ class TBATMode {
       result['modeType'] = modeType;
       if (runMode != null) result['runMode'] = runMode;
       result['lotList'] = [for (var lot in lotList) lot.toJson()];
-      if (stationEnabled || stationRlc.isNotEmpty) {
-        result['station'] = {
-          'enable': stationEnabled,
-          if (stationRlc.isNotEmpty) 'rlc': stationRlc,
-        };
+      // Station config
+      if (modeType == TBModeType.fertilizer) {
+        // Fertilizer mode: use specific pump/valve fields
+        if (stationEnabled || stationIriPump != null || stationFerPump != null || stationFerValve.isNotEmpty) {
+          result['station'] = {
+            if (stationIriPump != null) 'iri_pump': stationIriPump,
+            if (stationFerPump != null) 'fer_pump': stationFerPump,
+            if (stationFerValve.isNotEmpty) 'fer_valve': stationFerValve,
+          };
+        }
+      } else {
+        // Other modes: use legacy rlc list
+        if (stationEnabled || stationRlc.isNotEmpty) {
+          result['station'] = {
+            if (stationRlc.isNotEmpty) 'rlc': stationRlc,
+          };
+        }
       }
     } else {
       result['actionList'] = [for (var step in steps) step.toJson()];
@@ -112,6 +145,7 @@ class TBATMode {
       TBModeType.timer => !lotList.any((e) => !e.validateTimer()),
       TBModeType.dissolvedOxygen => !lotList.any((e) => !e.validateDO()),
       TBModeType.soilMoisture => !lotList.any((e) => !e.validateSM()),
+      TBModeType.fertilizer => !lotList.any((e) => !e.validateFertilizer()),
       _ => false,
     };
   }
